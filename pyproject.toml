@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=69.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "simplibs-actions"
+version = "0.1.0"
+description = "A composable Action pipeline system — chainable via >>, &, and if_matches, built on simplibs-rules."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+keywords = [
+    "actions",
+    "pipeline",
+    "composition",
+    "functional",
+    "validation",
+    "data-validation",
+    "simplibs",
+    "simplibs-actions",
+    "developer-tools",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "simplibs-rules>=0.2.2",
+    "simplibs-exception>=1.1.3",
+    "simplibs-validate>=0.2.1",
+    "simplibs-types>=0.2.0",
+]
+
+[[project.authors]]
+name = "Dalibor Sova (Sudip2708)"
+email = "daliborsova@seznam.cz"
+
+[project.urls]
+Homepage = "https://github.com/simplibs/simplibs-actions"
+Repository = "https://github.com/simplibs/simplibs-actions"
+Issues = "https://github.com/simplibs/simplibs-actions/issues"
+Changelog = "https://github.com/simplibs/simplibs-actions/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v"
+
+[tool.setuptools.packages.find]
+where = ["src"]
