@@ -1,7 +1,7 @@
 """
 Tests for _describe_annotation — best-effort human-readable naming of a raw annotation.
 """
-from simplibs.actions.creator._helpers.constants.EMPTY import EMPTY
+from simplibs.sentinels import EMPTY
 from simplibs.actions.creator._helpers.creators._helpers._describe_annotation import _describe_annotation
 
 

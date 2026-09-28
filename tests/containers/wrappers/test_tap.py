@@ -42,3 +42,21 @@ def test_tap_direct_call_curried():
     # Assert
     assert result == "payload"
     assert captured == ["payload"]
+
+
+@pytest.mark.asyncio
+async def test_tap_acall_executes_async_side_effect_and_returns_original_data():
+    """Verify that acall executes an async side-effect action and returns original data."""
+    side_effect_store = []
+
+    async def record_async_side_effect(data):
+        side_effect_store.append(f"async_processed_{data}")
+
+    action = tap(action=record_async_side_effect)
+
+    # Act
+    result = await action.acall("my_async_data")
+
+    # Assert
+    assert result == "my_async_data"
+    assert side_effect_store == ["async_processed_my_async_data"]

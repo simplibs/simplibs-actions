@@ -5,7 +5,8 @@ on — from the simplest one-line transformer (`identity`, `constant`) to a full
 composed pipeline (`sequence >> guard >> parallel`). It does not implement any
 transformation itself; instead it provides three things every action needs:
 
-1. A minimal, mandatory contract every concrete action must fulfill (`__call__`).
+1. A minimal, mandatory contract every concrete action must fulfill (`__call__` 
+   for synchronous execution, `acall` for asynchronous execution).
 2. Operator-based composition (`>>`, `&`, `|`) that lets any two actions — or an
    action and a `Rule`, or an action and a plain callable — combine into a new action,
    without either side needing to know anything about the other.
@@ -27,10 +28,16 @@ class Action(ABC):
 `Action` can never be instantiated directly — `__call__` is declared with
 `@abstractmethod` and carries no implementation of its own. Unlike `Rule` (where
 `is_valid` answers a yes/no question and `__call__` is just convenient sugar over it),
-for an `Action` **being callable IS the whole point** — there is no separate "real"
-method underneath it that a second name would expose. This is why `Action` needs no
+for an `Action` **being callable IS the whole point** — whether synchronously via
+`__call__` or asynchronously via `acall`. This is why `Action` needs no
 `execute`/`act` counterpart at the base-class level the way `Rule` needs `is_valid`
 alongside its own `__call__`.
+
+By default, `acall` runs synchronous actions off the main thread using an internal
+to-thread bridge. However, if an `Action` is generated from an `async def` source
+function, calling `__call__` synchronously will raise a structured `ParamError`
+(`ASYNC_ACTION_REQUIRES_ACALL`), preventing accidental un-awaited coroutine leaks and
+forcing the caller to use `await action.acall(data)`.
 
 Concrete subclasses arise two ways:
 
@@ -46,6 +53,7 @@ Concrete subclasses arise two ways:
 ## 🧭 Table of Contents
 
 * [`__call__`](#__call__)
+* [`acall`](#acall)
 * [`then` / `__rshift__`](#then--__rshift__)
 * [`__and__`](#__and__)
 * [`__or__`](#__or__)
@@ -84,6 +92,46 @@ def __call__(self, data: Any, /) -> Any:
     """Run this action over `data` and return the result."""
     raise NotImplementedError
 ```
+
+[▲ Back to top](#-table-of-contents)
+
+---
+
+### `acall`
+
+Async entry point for executing an action asynchronously.
+
+For synchronous actions, the base `Action` provides a default implementation that
+runs `__call__` in an async thread pool (`asyncio.to_thread`). For actions generated
+from an `async def` function, `acall` directly awaits the underlying asynchronous
+implementation.
+
+**Parameters:**
+
+* `data` (*Any*, positional-only): The value this action operates on.
+
+**Returns:**
+
+* `Any`: A coroutine that resolves to whatever this action produces from `data`.
+
+**Example usage:**
+
+```python
+result = await my_action.acall(some_input)
+```
+
+**Under the hood:**
+
+```python
+async def acall(self, data: Any, /) -> Any:
+    """Run this action asynchronously over `data` and return the result."""
+    import asyncio
+    return await asyncio.to_thread(self, data)
+```
+
+> **Note on Async-Sourced Actions:** Actions built from `async def` functions set
+> `__call__` to raise a `ParamError` (`ASYNC_ACTION_REQUIRES_ACALL`) if invoked
+> synchronously, directing you to use `await action.acall(data)` instead.
 
 [▲ Back to top](#-table-of-contents)
 

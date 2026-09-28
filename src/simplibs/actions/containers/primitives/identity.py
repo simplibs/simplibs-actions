@@ -11,6 +11,21 @@ def identity(
     return data
 
 
+async def _identity_acall(self, data: Any) -> Any:
+    """Async counterpart of `identity` — returns `data` unchanged.
+
+    A hand-written one-liner rather than `Action`'s default `acall`, so
+    that a no-op action stays a genuine no-op even when awaited: no
+    worker-thread dispatch for work that never does anything in the
+    first place.
+    """
+    return data
+
+
+# Attach the hand-written async counterpart directly onto the generated class —
+# see design notes for why this is worth the one extra line even for a no-op.
+identity.acall = _identity_acall
+
 identity = identity
 """
 No-op — returns `data` unchanged.
@@ -27,7 +42,10 @@ Output:
 A named, explicit "do nothing" is more readable inside `branch`'s
 `else_branch` / `fallback`'s `on_error` than `None`/omission, and is the
 correct neutral element for `sequence`/`parallel` wherever an explicit
-empty step is needed syntactically.
+empty step is needed syntactically. Callable both synchronously
+(`identity()(data)`) and asynchronously (`await identity().acall(data)`)
+— the async path never touches a worker thread, since there is nothing
+here to bridge.
 
 Example:
     >>> Identity()(42)
@@ -50,4 +68,17 @@ The old hand-written version had `NoOp.py: class IdentityAction` — the
 one place in the whole package where the file name and class name did
 not match. The functional style unifies this automatically, since the
 function's own name *is* the resulting action's name.
+
+## Why `acall` is hand-attached, even though the default would be *correct*
+Unlike `branch`/`for_each`/`retry`/`tap`, `Action`'s default `acall`
+(`asyncio.to_thread(self.__call__, data)`) would not be WRONG here —
+`identity` has no child action to mis-await, so nothing would break.
+It would, however, be pure waste: dispatching a worker thread to do
+literally nothing takes measurably longer than doing nothing directly.
+Since `identity` sits at the bottom of the composition chain (a common
+`else_branch`/`on_error` default), and the fix costs exactly one
+trivial line, this is the rare case where the cost/benefit calculus from
+`Action`'s own design notes tips all the way to "obviously worth it" —
+see this file's own docstring for context on why `identity` shows up in
+those positions often enough for the difference to matter.
 """

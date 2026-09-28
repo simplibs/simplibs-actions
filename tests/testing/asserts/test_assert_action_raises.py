@@ -90,3 +90,42 @@ def test_assert_action_raises_raises_on_sequence_length_mismatch(subtests):
             expected_exception_type=[ZeroDivisionError, TypeError],
             verbose=False,
         )
+
+
+def test_assert_action_raises_supports_async_action(subtests):
+    """Verify that assert_action_raises correctly catches exceptions in async actions."""
+
+    @to_action
+    async def _async_reciprocal(data: float) -> float:
+        if data == 0:
+            raise ZeroDivisionError("cannot divide by zero")
+        return 1 / data
+
+    action = _async_reciprocal()
+
+    assert_action_raises(
+        subtests,
+        action,
+        invalid_values=[0.0],
+        expected_exception_type=ZeroDivisionError,
+        verbose=False,
+    )
+
+
+def test_assert_action_raises_respects_explicit_is_async_override(subtests):
+    """Verify that is_async parameter can explicitly control the execution mode."""
+
+    @to_action
+    async def _async_fail(data: int) -> int:
+        raise ValueError("async-fail")
+
+    action = _async_fail()
+
+    assert_action_raises(
+        subtests,
+        action,
+        invalid_values=[1],
+        expected_exception_type=ValueError,
+        is_async=True,
+        verbose=False,
+    )

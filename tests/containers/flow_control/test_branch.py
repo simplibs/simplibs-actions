@@ -59,3 +59,39 @@ def test_branch_direct_call_without_currying():
     # Assert
     assert result_true == 20
     assert result_false == 5
+
+
+@pytest.mark.asyncio
+async def test_branch_acall_executes_async_then_branch_when_condition_is_true():
+    """Verify that acall awaits the async then_branch when condition evaluates to True."""
+    is_even = lambda x: x % 2 == 0
+
+    async def async_double(x: int) -> int:
+        return x * 2
+
+    async def async_zero(_x: int) -> int:
+        return 0
+
+    action = branch(condition=is_even, then_branch=async_double, else_branch=async_zero)
+
+    result = await action.acall(4)
+
+    assert result == 8
+
+
+@pytest.mark.asyncio
+async def test_branch_acall_executes_async_else_branch_when_condition_is_false():
+    """Verify that acall awaits the async else_branch when condition evaluates to False."""
+    is_even = lambda x: x % 2 == 0
+
+    async def async_double(x: int) -> int:
+        return x * 2
+
+    async def async_zero(_x: int) -> int:
+        return 0
+
+    action = branch(condition=is_even, then_branch=async_double, else_branch=async_zero)
+
+    result = await action.acall(5)
+
+    assert result == 0

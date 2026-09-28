@@ -129,3 +129,42 @@ def test_assert_action_skips_construction_check_without_action_class(subtests):
         invalid_init_params=[((), {"bogus": 1})],
         verbose=False,
     )
+
+
+def test_assert_action_supports_async_action(subtests):
+    """Verify that assert_action seamlessly handles async actions."""
+
+    @to_action
+    async def _async_double(data: int) -> int:
+        return data * 2
+
+    action = _async_double()
+
+    assert_action(
+        subtests,
+        action,
+        valid_values=[1, 2],
+        expected_outputs=[2, 4],
+        verbose=False,
+    )
+
+
+def test_assert_action_async_deep_check_verifies_sync_misuse_guard(subtests):
+    """Verify that deep_check=True asserts ParamError when sync __call__ is used on an async action."""
+
+    @to_action
+    async def _async_greet(data: str) -> str:
+        return f"Hello {data}"
+
+    action = _async_greet()
+
+    # deep_check=True + valid_values will invoke action("World") synchronously inside assert_action,
+    # which triggers raise_async_action_requires_acall_error (ParamError) and passes the check.
+    assert_action(
+        subtests,
+        action,
+        valid_values=["World"],
+        expected_outputs=["Hello World"],
+        deep_check=True,
+        verbose=False,
+    )

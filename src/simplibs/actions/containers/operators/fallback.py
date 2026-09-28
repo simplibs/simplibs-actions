@@ -29,6 +29,34 @@ def fallback(
         return data
 
 
+async def _fallback_acall(self, data: Any) -> Any:
+    """Async counterpart of `fallback`'s own body.
+
+    Mirrors the synchronous version's control flow exactly, one line at
+    a time, substituting `await ...acall(...)` for each direct call —
+    see this module's own design notes for why that substitution alone
+    is necessary rather than optional.
+    """
+
+    # 1. Attempt to execute the primary action over data
+    try:
+        return await as_action(self.action).acall(data)
+
+    # 2. Catch specified exception types
+    except self.exceptions:
+
+        # 2.1 If a fallback action is provided, execute it with data
+        if self.on_error is not None:
+            return await as_action(self.on_error).acall(data)
+
+        # 2.2 Otherwise safely return original data unchanged
+        return data
+
+
+# Attach the hand-written async counterpart directly onto the generated class —
+# see design notes for why this can't be derived generically by create_action.
+fallback.acall = _fallback_acall
+
 fallback = fallback
 """
 Tries `action` over `data`; on failure either runs `on_error` or returns
@@ -56,6 +84,8 @@ Merges what used to be two separate containers (`Try`/`Fallback`) into
 one: `on_error=None` behaves like the old `Try` without a catch action
 (returns `data`); `on_error=<action>` behaves like the old `Fallback`,
 now with an optional `exceptions` filter for both cases at once.
+Callable both synchronously (`fallback(action=..., ...)(data)`) and
+asynchronously (`await fallback(action=..., ...).acall(data)`).
 
 Example:
     >>> fallback(action=risky_parse, on_error=default_value)(raw_input)
@@ -85,4 +115,16 @@ Unlike `parallel`, nesting `fallback` calls behaves identically whether
 grouped as `(a | b) | c` or `a | (b | c)` — sequential try/except is
 naturally associative regardless of nesting depth. No compose_class
 counterpart exists for this reason; there is nothing broken to fix.
+
+## Why `acall` is hand-attached here too
+Same underlying reason as `sequence`/`parallel`: `fallback`'s own source
+function is plain `def`, and `Action`'s default `acall` would run the
+whole try/except inside one thread, calling each child's synchronous
+`__call__` rather than its `.acall(...)` — which would immediately break
+the moment `action` or `on_error` turns out to be built from an
+`async def` source (that child's own `__call__` is designed to raise —
+see `create_call`'s design notes). `_fallback_acall` mirrors the sync
+body exactly, one line at a time, substituting `await ...acall(...)` for
+each direct call — same control flow, same exception handling, just
+async-aware at each step.
 """

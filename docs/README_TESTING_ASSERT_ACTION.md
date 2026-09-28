@@ -9,7 +9,7 @@ own code. It mirrors the Facade pattern already established by `simplibs-rules`'
 `assert_rule_contract` and `simplibs-exception`'s `assert_exception_function`: one
 call, fed with data, exercises every deterministic corner of the contract — while
 leaving the one thing no generic tool can infer (what a given input *should* produce)
-to the caller.
+to the caller. Fully supports both synchronous and native `async def` actions.
 
 ## 💡 Table of Contents:
 > * [⚙️ Architectural Principles](#-architectural-principles)
@@ -38,11 +38,14 @@ to the caller.
   misconfigured constructor raises) run automatically; business-logic-specific checks
   (what each valid input should produce, which invalid input should trigger which
   exception) must be supplied by the caller.
-* **Toolkit Reuse Over Reimplementation:** Because an `Action` instance is directly
-  callable (`action(data)`), the negative-path check is a near-direct pass-through to
+* **Sync & Native Async Dual Support:** Automatically detects whether the target action
+  is async (or respects the explicit `is_async` parameter). Positive-path outputs and
+  negative-path exceptions transparently execute through the async channel (`acall`)
+  when testing async actions, isolating event-loop execution cleanly via `asyncio.run`.
+* **Toolkit Reuse Over Reimplementation:** Execution paths are wrapped inside zero-arg
+  closures, allowing the negative-path check to pass straight through to
   `simplibs-exception`'s own `assert_function_raises` — no raise/type-check logic is
-  duplicated here. Only the positive-path output check needed a purpose-built blade,
-  since nothing else in this ecosystem checks a return value against an expectation.
+  duplicated here.
 * **Fail-Fast Type Guard:** `isinstance(action, Action)` is asserted immediately,
   before any check runs — a misuse of this helper itself produces one clear error, not
   a cascade of confusing subtest failures deep inside a loop.
@@ -58,11 +61,13 @@ to the caller.
 ## 🧭 Execution Flow
 
 1. **Fail-fast type guard** — `action` must be an `Action` instance.
-2. **Output check** *(if `valid_values` given)* — delegated to
+2. **Auto-detection of async execution** — checks `inspect.iscoroutinefunction(action.acall)`
+   unless `is_async` is explicitly passed.
+3. **Output check** *(if `valid_values` given)* — delegated to
    [`assert_action_output`](#assert_action_output).
-3. **Raises check** *(if `invalid_values` given)* — delegated to
+4. **Raises check** *(if `invalid_values` given)* — delegated to
    [`assert_action_raises`](#assert_action_raises).
-4. **`deep_check` (default `True`)** additionally runs:
+5. **`deep_check` (default `True`)** additionally runs:
    * [`assert_action_io_types`](#assert_action_io_types) — always, once `deep_check`
      is on.
    * [`assert_action_construction`](#assert_action_construction) — only if both
@@ -85,7 +90,16 @@ assert_action(
     expected_exception_type=KeyError,
 )
 
-# 2. Opting into the constructor-guard sweep too
+# 2. Async action contract sweep
+assert_action(
+    subtests,
+    async_greet_action,
+    valid_values=[{"name": "Ann"}],
+    expected_outputs=["Hi, Ann!"],
+    is_async=True,
+)
+
+# 3. Opting into the constructor-guard sweep too
 assert_action(
     subtests,
     greet_action,
@@ -93,7 +107,7 @@ assert_action(
     invalid_init_params=[((), {"prefix": 123})],
 )
 
-# 3. Basic contract only — skip _input_type/_output_type and construction checks
+# 4. Basic contract only — skip _input_type/_output_type and construction checks
 assert_action(subtests, identity_action, deep_check=False)
 ```
 
@@ -129,6 +143,8 @@ assert_action(subtests, identity_action, deep_check=False)
 * **`construction_exception_type`** (`type[Exception] | Sequence[type[Exception] | None]`):
   Default `ValidationError` — see [`assert_action_construction`](#assert_action_construction)
   for why.
+* **`is_async`** (`bool | None`): Default `None`. Explicitly specifies whether the action
+  is async. If `None`, auto-detected via `acall`.
 * **`verbose`** (`bool`): Default `True`. Registers individual checks as isolated
   pytest subtests.
 * **`intro`** (`str`): Default `""`. Prefix for generated subtest names.
@@ -149,6 +165,7 @@ def assert_action(
     action_class: type[Action] | None = None,
     invalid_init_params: list[tuple[tuple[Any, ...], dict[str, Any]]] | None = None,
     construction_exception_type: type[Exception] | Sequence[type[Exception] | None] = ValidationError,
+    is_async: bool | None = None,
     verbose: bool = True,
     intro: str = "",
     deep_check: bool = True,
@@ -164,15 +181,16 @@ def assert_action(
 ### `assert_action_output`
 
 Verifies that calling the action on each valid value produces the matching expected
-output — the one thing generic tooling cannot infer on its own. Not built on top of
-`assert_function_valid_input` (which only checks "doesn't raise", with no concept of
-an expected return value); this is a small, purpose-built blade instead.
+output — the one thing generic tooling cannot infer on its own. Supports both synchronous
+and asynchronous execution (`action.acall`). Not built on top of `assert_function_valid_input`
+(which only checks "doesn't raise", with no concept of an expected return value); this is
+a small, purpose-built blade instead.
 
 ```python
 def assert_action_output(
     subtests: Any, action: Action,
     valid_values: list[Any], expected_outputs: list[Any],
-    *, verbose: bool = True, intro: str = "",
+    *, is_async: bool | None = None, verbose: bool = True, intro: str = "",
 ) -> None: ...
 ```
 
@@ -186,17 +204,16 @@ confusing off-by-one `IndexError` mid-sweep.
 
 ### `assert_action_raises`
 
-Verifies that calling the action on each invalid value raises the expected
-exception — a thin, near-direct pass-through to `simplibs-exception`'s own
-`assert_function_raises`, since an `Action` instance is callable exactly like a plain
-function.
+Verifies that calling the action on each invalid value raises the expected exception.
+Wraps execution inside zero-arg closures to seamlessly handle both sync calls and async
+executions (`asyncio.run(action.acall(val))`) through `simplibs-exception`'s `assert_function_raises`.
 
 ```python
 def assert_action_raises(
     subtests: Any, action: Action, invalid_values: list[Any],
     *,
     expected_exception_type: type[Exception] | Sequence[type[Exception] | None] | None = None,
-    verbose: bool = True, intro: str = "",
+    is_async: bool | None = None, verbose: bool = True, intro: str = "",
 ) -> None: ...
 ```
 

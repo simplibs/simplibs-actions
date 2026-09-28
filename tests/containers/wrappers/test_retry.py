@@ -73,3 +73,45 @@ def test_retry_direct_call_curried():
 
     # Assert
     assert result == 11
+
+
+@pytest.mark.asyncio
+async def test_retry_acall_succeeds_after_transient_failures():
+    """Verify that acall retries an async action until it succeeds."""
+    attempts_count = 0
+
+    async def flaky_async_action(data):
+        nonlocal attempts_count
+        attempts_count += 1
+        if attempts_count < 3:
+            raise ValueError("Async temporary failure")
+        return f"async_success_{data}"
+
+    action = retry(action=flaky_async_action, attempts=3, exceptions=(ValueError,))
+
+    # Act
+    result = await action.acall("test")
+
+    # Assert
+    assert result == "async_success_test"
+    assert attempts_count == 3
+
+
+@pytest.mark.asyncio
+async def test_retry_acall_raises_last_exception_when_all_attempts_fail():
+    """Verify that acall re-raises the last caught exception when all attempts fail."""
+    attempts_count = 0
+
+    async def always_fails_async(data):
+        nonlocal attempts_count
+        attempts_count += 1
+        raise KeyError(f"Async failed attempt {attempts_count}")
+
+    action = retry(action=always_fails_async, attempts=3, exceptions=(KeyError,))
+
+    # Act & Assert
+    with pytest.raises(KeyError) as exc_info:
+        await action.acall("payload")
+
+    assert "Async failed attempt 3" in str(exc_info.value)
+    assert attempts_count == 3

@@ -35,3 +35,18 @@ def test_identity_direct_call_curried():
 
     # Assert
     assert result == "test_value"
+
+
+@pytest.mark.asyncio
+async def test_identity_acall_returns_input_data_unchanged():
+    """Verify that acall asynchronously returns the input data unchanged."""
+    action = identity()
+
+    result_int = await action.acall(42)
+    result_str = await action.acall("hello")
+    complex_object = {"key": "value"}
+    result_obj = await action.acall(complex_object)
+
+    assert result_int == 42
+    assert result_str == "hello"
+    assert result_obj is complex_object

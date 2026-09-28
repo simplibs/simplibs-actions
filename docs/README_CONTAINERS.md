@@ -32,14 +32,26 @@ not part of this package's own public surface.
 
 ## 🧭 Table of Contents
 
-* **Flow control** — [`guard`](#guard) · [`branch`](#branch) · [`for_each`](#for_each)
-* **Operators** — [`sequence`](#sequence) · [`parallel`](#parallel) ·
-  [`fallback`](#fallback) · [`SequenceCompose`](#sequencecompose) ·
-  [`ParallelCompose`](#parallelcompose)
-* **Primitives** — [`identity`](#identity) · [`constant`](#constant)
-* **Wrappers** — [`lambda_action`](#lambda_action) · [`tap`](#tap) ·
-  [`retry`](#retry) · [`log_action`](#log_action)
-* [Aliases](#aliases)
+* **Flow control**
+  * [`guard`](#guard)
+  * [`branch`](#branch)
+  * [`for_each`](#for_each)
+* **Operators**
+  * [`sequence`](#sequence)
+  * [`parallel`](#parallel)
+  * [`fallback`](#fallback)
+  * [`SequenceCompose`](#sequencecompose)
+  * [`ParallelCompose`](#parallelcompose)
+* **Primitives**
+  * [`identity`](#identity)
+  * [`constant`](#constant)
+* **Wrappers**
+  * [`lambda_action`](#lambda_action)
+  * [`tap`](#tap)
+  * [`retry`](#retry)
+  * [`log_action`](#log_action)
+* **Aliases**
+  * [`Aliases`](#aliases)
 
 [⬅️ Back to main README](../README.md#-built-in-containers)
 
@@ -121,7 +133,9 @@ path.
 
 **Output:**
 
-* `Any`: `then_branch(data)`, `else_branch(data)`, or `data` unchanged.
+* `Any`: `then_branch(data)`, `else_branch(data)`, or `data` unchanged. 
+  Supports both synchronous execution (`branch(...)(data)`) and asynchronous execution 
+  (`await branch(...).acall(data)`), awaiting only the chosen branch.
 
 **Example usage:**
 
@@ -167,7 +181,10 @@ list.
 
 **Output:**
 
-* `list[Any]`: One result per item, in iteration order.
+* `list[Any]`: One result per item, in iteration order. 
+  Callable both synchronously (`for_each(...)(data)`) and asynchronously 
+  (`await for_each(...).acall(data)`). In async mode, all items are processed 
+  **concurrently** via `asyncio.gather`.
 
 **Raises:**
 
@@ -221,7 +238,9 @@ steps as one unit; use `>>` for everything else.
 
 **Output:**
 
-* `Any`: The final step's return value.
+* `Any`: The final step's return value. Supports both synchronous execution 
+  (`sequence(...)(data)`) and asynchronous execution (`await sequence(...).acall(data)`), 
+  properly awaiting each inner step in order.
 
 **Example usage:**
 
@@ -262,7 +281,10 @@ to `SequenceCompose` — plain `parallel` nests when chained directly, changing 
 
 **Output:**
 
-* `tuple[Any, ...]`: One result per branch, in the same order as `branches`.
+* `tuple[Any, ...]`: One result per branch, in the same order as `branches`. 
+  Callable both synchronously (`parallel(...)(data)`) and asynchronously 
+  (`await parallel(...).acall(data)`). In async mode, all branches are executed 
+  **concurrently** via `asyncio.gather`.
 
 **Example usage:**
 
@@ -308,7 +330,8 @@ filter shared by both.
 **Output:**
 
 * `Any`: `action`'s result on success; `on_error`'s result, or `data` unchanged, on
-  failure.
+  failure. Supports both synchronous execution (`fallback(...)(data)`) and asynchronous 
+  execution (`await fallback(...).acall(data)`).
 
 **Example usage:**
 
@@ -448,7 +471,8 @@ needs to exist but do nothing.
 
 **Output:**
 
-* `Any`: `data`, unchanged.
+* `Any`: `data`, unchanged. Callable both synchronously (`identity()(data)`) and 
+  asynchronously (`await identity().acall(data)`) without thread pool overhead.
 
 **Under the hood:**
 
@@ -476,7 +500,8 @@ Ignores `data`, always returns `value`.
 
 **Output:**
 
-* `Any`: `value`.
+* `Any`: `value`. Callable both synchronously (`constant(...)(data)`) and 
+  asynchronously (`await constant(...).acall(data)`) without thread pool overhead.
 
 **Under the hood:**
 
@@ -498,9 +523,14 @@ Adapter for a raw callable that didn't originate from `to_action` — the contai
 `Action.resolve_action` itself constructs for any plain callable used anywhere an
 `Action` is expected.
 
+If `func` is an asynchronous callable (`async def` or a function returning a coroutine),
+`lambda_action` automatically routes execution through `acall`. Calling it synchronously
+via `__call__` will raise a structured `ParamError` (`ASYNC_ACTION_REQUIRES_ACALL`),
+preventing un-awaited coroutine leaks.
+
 **Init Params:**
 
-* `func` (*Callable[[Any], Any]*): The callable to run.
+* `func` (*Callable[[Any], Any]*): The synchronous or asynchronous callable to run.
 
 **Main Param:**
 
@@ -508,14 +538,20 @@ Adapter for a raw callable that didn't originate from `to_action` — the contai
 
 **Output:**
 
-* `Any`: `func(data)`.
+* `Any`: `func(data)` for synchronous callables, or an awaited result via `acall` for async callables.
 
 **Under the hood:**
 
 ```python
 @to_action
 def lambda_action(data: Any, func: Callable[[Any], Any]) -> Any:
-    return func(data)
+    if inspect.iscoroutinefunction(func):
+        return func(data)  # awaited inside generated acall
+    result = func(data)
+    if inspect.iscoroutine(result):
+        # Prevent un-awaited coroutines if a sync wrapper returned a coroutine object
+        raise_async_action_requires_acall_error(func)
+    return result
 ```
 
 [▲ Back to top](#-table-of-contents)
@@ -539,7 +575,8 @@ that shouldn't alter the pipeline's data flow.
 
 **Output:**
 
-* `Any`: `data`, unchanged.
+* `Any`: `data`, unchanged. Supports both synchronous execution (`tap(...)(data)`) and 
+  asynchronous execution (`await tap(...).acall(data)`), awaiting the side effect.
 
 **Under the hood:**
 
@@ -573,7 +610,9 @@ exception if every attempt is exhausted.
 
 **Output:**
 
-* `Any`: `action(data)`'s result, from whichever attempt first succeeds.
+* `Any`: `action(data)`'s result, from whichever attempt first succeeds. 
+  Supports both synchronous execution (`retry(...)(data)`) and asynchronous execution 
+  (`await retry(...).acall(data)`), awaiting each retry attempt.
 
 **Raises:**
 

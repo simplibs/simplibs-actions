@@ -127,3 +127,64 @@ def test_rand_supports_rule_and_action():
     pipeline = is_integer & double
 
     assert pipeline(4) == (4, 8)
+
+
+@pytest.mark.asyncio
+async def test_action_default_acall_bridges_sync_call_via_thread():
+    """Verify that Action's default acall runs synchronous action via thread bridge."""
+    double = lambda_action(func=lambda x: x * 2)
+
+    result = await double.acall(5)
+
+    assert result == 10
+
+
+@pytest.mark.asyncio
+async def test_action_rshift_acall_chains_async_pipeline():
+    """Verify that `>>` pipeline works asynchronously via acall."""
+
+    async def async_double(x: int) -> int:
+        return x * 2
+
+    async def async_add_one(x: int) -> int:
+        return x + 1
+
+    pipeline = lambda_action(func=async_double) >> lambda_action(func=async_add_one)
+
+    result = await pipeline.acall(5)
+
+    assert result == 11
+
+
+@pytest.mark.asyncio
+async def test_action_and_acall_runs_parallel_async_pipeline():
+    """Verify that `&` pipeline runs concurrently via acall."""
+
+    async def async_double(x: int) -> int:
+        return x * 2
+
+    async def async_square(x: int) -> int:
+        return x * x
+
+    pipeline = lambda_action(func=async_double) & lambda_action(func=async_square)
+
+    result = await pipeline.acall(3)
+
+    assert result == (6, 9)
+
+
+@pytest.mark.asyncio
+async def test_action_or_acall_runs_fallback_async_pipeline():
+    """Verify that `|` pipeline runs fallback action via acall when primary fails."""
+
+    async def async_failing(_x: int) -> int:
+        raise ValueError("async_boom")
+
+    async def async_safe(x: int) -> int:
+        return x
+
+    pipeline = lambda_action(func=async_failing) | lambda_action(func=async_safe)
+
+    result = await pipeline.acall(7)
+
+    assert result == 7

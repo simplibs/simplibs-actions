@@ -1,6 +1,5 @@
 from typing import Any
-# Outers
-from ...constants import EMPTY
+from simplibs.sentinels import EMPTY
 
 
 def _describe_annotation(annotation: Any) -> str | None:

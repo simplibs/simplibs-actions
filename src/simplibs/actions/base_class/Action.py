@@ -1,3 +1,4 @@
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Any
 from simplibs.rules import Rule
@@ -18,12 +19,20 @@ class Action(ABC):
     factory can derive on its own), or generated from an ordinary
     function via `create_action`/`to_action` (e.g. `guard`, `branch`,
     `sequence`, `fallback` — nearly everything else).
+
+    `acall` is the async counterpart — always present, never abstract.
+    Every `Action`, even one with no async awareness of its own, is
+    awaitable via the default implementation below.
     """
 
     # Hook signaling to Rule that this object is not meant to be silently
     # absorbed by `Rule.__and__`/`__or__` as a plain predicate — see
     # Rule.py's own design notes for the full rationale.
     __not_rule__ = True
+
+    # Flag indicating whether this action is natively asynchronous.
+    # Defaults to False for synchronous/hand-written actions.
+    is_async: bool = False
 
     # ----------------------------------------------------------------------
     # 1) Executable Interface
@@ -33,6 +42,22 @@ class Action(ABC):
     def __call__(self, data: Any, /) -> Any:
         """Run this action over `data` and return the result."""
         raise NotImplementedError
+
+    async def acall(self, data: Any, /) -> Any:
+        """Run this action asynchronously.
+
+        Default implementation: bridges the synchronous `__call__` into
+        an async context via a worker thread, so ANY Action — even one
+        with no async awareness at all — is awaitable for free, without
+        blocking the event loop it's awaited from.
+
+        Actions built from a genuinely `async def` source function (via
+        `create_action`) override this directly with a real coroutine
+        that awaits their own async logic — no thread hop at all in
+        that case. See `create_call`'s own design notes for exactly how
+        that override is generated.
+        """
+        return await asyncio.to_thread(self.__call__, data)
 
     # ----------------------------------------------------------------------
     # 2) Operator-Based Composition — Forward Direction (self on the left)
@@ -120,7 +145,7 @@ class Action(ABC):
 
 
 _DESIGN_NOTES = """
-# Action — base abstract class (redesigned)
+# Action — base abstract class (async-aware)
 
 ## Why only `__call__`, no `execute`/`act` at the base level
 
@@ -147,6 +172,39 @@ Subclasses arise in two ways:
   *generator* (needed for the separate `validate_call`/`log_this`
   wrapping of each), not a requirement of the base class itself.
 
+## `is_async` class attribute contract
+Every `Action` subclass explicitly declares an `is_async: bool` flag.
+* Defaults to `False` on the base abstract `Action` class, ensuring that all 
+  legacy, hand-written, or synchronous actions carry this attribute uniformly 
+  without requiring manual boilerplate.
+* Dynamically generated actions via `create_action` set this flag to `True` 
+  or `False` based on introspection of the underlying source function.
+
+## `acall` — always present, never abstract
+
+Every `Action` must be callable synchronously (`__call__` is the one
+mandatory contract), but not every `Action` needs to think about async
+at all to still be usable from one. `acall`'s default implementation —
+`asyncio.to_thread(self.__call__, data)` — makes literally any `Action`
+awaitable for free: a blocking sync call moved off the event loop, no
+extra work required from whoever wrote it.
+
+This default is a real, measured trade-off, not a free lunch:
+* **When nothing ever calls `acall`:** genuinely free — an unused method
+  on a class costs nothing at call time.
+* **When a whole pipeline is natively async** (every step built from an
+  `async def` source function): also cheap — one `await` per hop,
+  no thread involved at all, because those actions override `acall`
+  directly (see `create_call`'s design notes).
+* **When a sync action's `acall` is actually invoked from async code:**
+  real, non-negligible cost — a thread-pool dispatch, order of tens of
+  microseconds, vs. nanoseconds for calling `__call__` directly. Worth
+  paying for genuine I/O-bound work; wasteful for a cheap, purely
+  computational action. This is an inherent cost of bridging sync code
+  into an event loop safely, not something a cleverer default could
+  remove — the alternative (calling blocking code directly on the loop)
+  would stall every other coroutine sharing it.
+
 ## Reflected operators — `__rand__`/`__ror__`/`__rrshift__`
 
 Triggered exclusively by the `__not_rule__` hook on the `Rule` side (see
@@ -168,7 +226,12 @@ All three are implemented as the same one-line pattern —
 `self.resolve_action(other) <op> self` — wrap the left-hand operand,
 hand off to the forward operator. No second copy of any container's
 construction logic; one place of truth covers both `rule & action` and
-`action & action`.
+`action & action`. This applies unchanged to the async path too: since
+`then`/`__and__`/`__or__` build the SAME composite objects
+(`SequenceCompose`/`ParallelCompose`/`fallback` instances) regardless of
+whether `acall` will ever be invoked on them, no reflected-operator
+logic needed duplicating for async — it was already async-transparent
+by construction.
 
 **A typing cost, not a behavioral one:** `Rule.__and__`/`__or__` can now
 return either `Rule` or `Action`, depending on the right-hand operand's
@@ -185,4 +248,15 @@ Still the single hook driving this entire asymmetry — `Rule` declines to
 treat `Action` as a predicate, `Action` supplies its own, meaningful
 interpretation instead. See `Rule.py`'s design notes for the complete
 rationale.
+
+## What is deliberately NOT here yet
+
+`sequence`/`parallel`/`fallback` — the containers that run OTHER actions
+internally — need their own hand-written `acall`, not this class's
+default, to get real concurrency (`parallel`'s `&`) and to correctly
+await native-async steps without a needless thread hop. That logic lives
+in each container's own module, for the same reason `compose()` lives on
+`SequenceCompose`/`ParallelCompose` rather than here: it's bespoke to
+what each container actually does with its children, not something this
+base class could derive generically.
 """

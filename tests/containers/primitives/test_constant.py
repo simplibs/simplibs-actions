@@ -36,3 +36,17 @@ def test_constant_direct_call_curried():
 
     # Assert
     assert result == "fixed_output"
+
+
+@pytest.mark.asyncio
+async def test_constant_acall_returns_configured_value_and_ignores_data():
+    """Verify that acall returns the fixed value asynchronously and ignores input data."""
+    action = constant(value=42)
+
+    result_int = await action.acall(100)
+    result_str = await action.acall("string_input")
+    result_none = await action.acall(None)
+
+    assert result_int == 42
+    assert result_str == 42
+    assert result_none == 42

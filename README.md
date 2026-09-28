@@ -8,9 +8,9 @@
 
 A lightweight Python library for building `Action` objects: single-purpose pipeline steps
 that chain into sequences, run in parallel, and fall back on failure using plain Python
-operators — no pipeline framework, no DSL, no boilerplate. Any function becomes an `Action`
-with one decorator, complete with type-checked construction and calls, structured
-diagnostics on failure, and its own dedicated testing toolkit.
+operators — no pipeline framework, no DSL, no boilerplate. Any function (sync or async)
+becomes an `Action` with one decorator, complete with type-checked construction and calls,
+native `acall` support, structured diagnostics on failure, and its own dedicated testing toolkit.
 
 ```python
 from simplibs.actions import to_action
@@ -83,7 +83,7 @@ action = double()
 action(21)   # -> 42
 ```
 
-### Level 2: Composing Actions
+### Level 2: Composing Actions (Sync & Async)
 
 ```python
 from simplibs.actions import to_action
@@ -111,6 +111,14 @@ both("Hi")                                 # -> ("HI", "hi")
 # Fallback: try the left side; on failure, run the right side instead
 safe = risky_parse() | default_value(value=None)
 safe(raw_input)
+
+# Async Support: native async def functions expose acall()
+@to_action
+async def fetch_user(user_id: int) -> dict:
+    return {"id": user_id, "name": "Alice"}
+
+user_action = fetch_user()
+user_data = await user_action.acall(42)   # -> {"id": 42, "name": "Alice"}
 ```
 
 `Rule` instances from `simplibs-rules` compose the same way — `is_integer >> add_one`
@@ -166,8 +174,14 @@ class Action(ABC):
 
     @abstractmethod
     def __call__(self, data: Any, /) -> Any:
-        """Run this action over `data` and return the result."""
+        """Run this action synchronously over `data` and return the result.
+        Raises AsyncActionRequiresAcallError if called on an async action.
+        """
         raise NotImplementedError
+
+    async def acall(self, data: Any, /) -> Any:
+        """Run this action asynchronously over `data` and return the result."""
+        ...
 
     def then(self, next_step: Any) -> "Action":
         """Chains this action with a subsequent action, rule, or callable."""
@@ -235,8 +249,9 @@ Greet = create_action(greet)
 ```
 
 `create_action` fully annotates, validates, and documents the generated class's
-`__init__`/`__call__`/`act` — nothing about the source function's own signature is lost
-or flattened into `(*args, **kwargs)`.
+`__init__`/`__call__`/`acall`/`act` — nothing about the source function's own signature is lost
+or flattened into `(*args, **kwargs)`. Sync functions support `__call__`, while `async def`
+functions generate native `acall` methods.
 
 ➡️ [README_CREATOR](https://github.com/simplibs/simplibs-actions/blob/main/docs/README_CREATOR.md) — `create_action` and every internal resolver/generator it's built from
 ➡️ [README_DECOTATOR](https://github.com/simplibs/simplibs-actions/blob/main/docs/README_DECOTATOR.md) — `to_action`, the decorator interface
@@ -268,10 +283,12 @@ assert_action(
 
 ## ⚠️ Exceptions
 
-Every diagnostic this library raises — a rejected constructor argument, a type
-mismatch on call, an unsupported source-function signature — is a structured
+Every diagnostic this library raises — a rejected constructor argument, calling an
+async action via sync `__call__` (`AsyncActionRequiresAcallError`), a type mismatch
+on call, or an unsupported source-function signature — is a structured
 [`simplibs.exception`](https://pypi.org/project/simplibs-exception/) card
-(`ParamError`, `ValidationError`, ...), not a bare `TypeError`/`ValueError` traceback.
+(`ParamError`, `ValidationError`, `AsyncActionRequiresAcallError`), not a bare
+`TypeError`/`ValueError` traceback.
 Validation failures on a generated `Action`'s own parameters (constructor or call) go
 through [`simplibs-validate`](https://pypi.org/project/simplibs-validate/)'s
 `validate_call`, using the same annotation-decomposition engine as

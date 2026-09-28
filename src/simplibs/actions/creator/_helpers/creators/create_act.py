@@ -1,7 +1,6 @@
 import inspect
 from typing import Any, Callable
-# Outers
-from ..constants import EMPTY
+from simplibs.sentinels import EMPTY
 
 
 def create_act(
@@ -22,7 +21,10 @@ def create_act(
         A real function with `func`'s exact parameter names, annotations,
         docstring, `__name__`, and defaults, plus one added keyword-only
         `_validate_call: bool = True` parameter that is accepted and
-        silently dropped — never forwarded into `func` itself.
+        silently dropped — never forwarded into `func` itself. If `func`
+        is a native `async def`, the generated `act` is `async def` too,
+        and calls `func` with `await`; otherwise both are synchronous,
+        exactly as before.
     """
 
     # 1. Prepare accumulators
@@ -60,29 +62,35 @@ def create_act(
         namespace["_return_annotation"] = return_annotation
         return_src = " -> _return_annotation"
 
-    # 4. Build the source text
+    # 4. Detect whether func is a native coroutine function — determines
+    #    `def` vs `async def`, and whether calling __func__ needs `await`.
+    is_async = inspect.iscoroutinefunction(func)
+    def_keyword = "async def" if is_async else "def"
+    call_prefix = "await " if is_async else ""
+
+    # 5. Build the source text
     source = (
-        f"def act(*, {', '.join(params_entry)}, _validate_call: bool = True)"
+        f"{def_keyword} act(*, {', '.join(params_entry)}, _validate_call: bool = True)"
         f"{return_src}:\n"
-        f"    return __func__({', '.join(call_args)})"
+        f"    return {call_prefix}__func__({', '.join(call_args)})"
     )
 
-    # 5. Compile the function
+    # 6. Compile the function
     exec(source, namespace)
     generated_act = namespace["act"]
 
-    # 6. Carry the source function's own docstring over onto act — act is
+    # 7. Carry the source function's own docstring over onto act — act is
     #    just func wearing a thin validation/logging coat, so func's own
     #    documentation is the most accurate description available.
     generated_act.__doc__ = func.__doc__
 
-    # 7. Carry the source function's own __name__ over onto act too —
+    # 8. Carry the source function's own __name__ over onto act too —
     #    see design notes for why this matters and why "act" itself
     #    never appears here.
     generated_act.__name__ = func.__name__
     generated_act.__qualname__ = func.__name__
 
-    # 8. Return the generated object
+    # 9. Return the generated object
     return generated_act
 
 
@@ -137,9 +145,22 @@ reference that was deliberately left out of the docstring — "yes, this
 is act, wrapping func" is already obvious from where you're looking; it
 doesn't need to be repeated in every generated identifier too.
 
+## Async source functions — `act` mirrors `func`'s own sync/async nature
+`inspect.iscoroutinefunction(func)` decides everything here: an
+`async def func` produces an `async def act` that `await`s `__func__`;
+a plain `def func` produces the same synchronous `act` this file always
+generated. Nothing about the parameter/annotation/default handling above
+changes either way — only the `def`/`async def` keyword and the presence
+of `await` on the one call line. `create_call` (the sibling generator
+building `__call__`/`acall`) makes the exact same detection independently
+— see its own design notes for why that duplication is intentional
+rather than threaded through as a shared flag.
+
 ## Relationship to create_call
-`create_call` builds `__call__`, which explicitly forwards its own
-`_validate_call` into `self.act(..., _validate_call=_validate_call)`.
-This file's half of the contract is simply: accept that flag, honor
-`validate_call`'s bypass detection, and never leak it into `func`.
+`create_call` builds `__call__` (and, for an async-sourced action,
+`acall` too), which explicitly forwards its own `_validate_call` into
+`self.act(..., _validate_call=_validate_call)` — synchronously or via
+`await`, depending on which entry point is calling. This file's half of
+the contract is simply: accept that flag, honor `validate_call`'s bypass
+detection, and never leak it into `func`.
 """

@@ -16,6 +16,7 @@ def create_action(
     use_validations: bool = True,
     use_logging: bool = True,
     class_name: str | None = None,
+    _validate_call: bool = True,
 ) -> Any:
     ...
 ```
@@ -24,23 +25,31 @@ def create_action(
 
 ## 🧭 Table of Contents
 
-* [`create_action`](#create_action) — the orchestrator
-* **Resolvers** — [`resolve_param`](#resolve_param) ·
-  [`resolve_class_name`](#resolve_class_name) ·
-  [`unwrap_log_this_and_validate_call`](#unwrap_log_this_and_validate_call)
-* **Creators** — [`create_init_and_slots`](#create_init_and_slots) ·
-  [`create_call`](#create_call) · [`create_act`](#create_act)
-* **Creator helpers** — [`build_init_docstring`](#build_init_docstring) ·
-  [`build_call_docstring`](#build_call_docstring) ·
-  [`_describe_annotation`](#_describe_annotation)
-* **Validations** — [`validate_param_kinds`](#validate_param_kinds) ·
-  [`validate_params_annotations`](#validate_params_annotations) ·
-  [`validate_return_annotations`](#validate_return_annotations) ·
-  [`_verify_type_is_validatable`](#_verify_type_is_validatable)
-* **Diagnostic raisers** — [`raise_action_instance_error`](#raise_action_instance_error) ·
-  [`raise_no_parameters`](#raise_no_parameters) ·
-  [`raise_main_param_not_found`](#raise_main_param_not_found)
-* [`EMPTY`](#empty)
+• Orchestrator
+  • [`create_action`](#create_action)
+• Resolvers
+  • [`resolve_param`](#resolve_param)
+  • [`resolve_class_name`](#resolve_class_name)
+  • [`unwrap_log_this_and_validate_call`](#unwrap_log_this_and_validate_call)
+• Creators
+  • [`create_init_and_slots`](#create_init_and_slots)
+  • [`create_call`](#create_call)
+  • [`create_act`](#create_act)
+• Creator helpers
+  • [`build_init_docstring`](#build_init_docstring)
+  • [`build_call_docstring`](#build_call_docstring)
+  • [`_describe_annotation`](#_describe_annotation)
+• Validations
+  • [`validate_param_kinds`](#validate_param_kinds)
+  • [`validate_params_annotations`](#validate_params_annotations)
+  • [`validate_return_annotations`](#validate_return_annotations)
+  • [`_verify_type_is_validatable`](#_verify_type_is_validatable)
+• Diagnostic raisers
+  • [`raise_action_instance_error`](#raise_action_instance_error)
+  • [`raise_no_parameters`](#raise_no_parameters)
+  • [`raise_main_param_not_found`](#raise_main_param_not_found)
+• Constants
+  • [`EMPTY`](#empty)
 
 [⬅️ Back to main README](../README.md#-create_action)
 
@@ -55,28 +64,35 @@ main one (`MyAction(other_param=...)`), and called with the main parameter alone
 
 **Parameters:**
 
-* `func` (*Callable[..., Any]*): The source function to wrap. If it's already an
-  `Action` subclass, it's returned unchanged (idempotent, like `Path(Path(x))`); if
-  it's an `Action` *instance*, `raise_action_instance_error` is raised instead — its
-  configuration is already bound, so silently misreading it as fresh constructor
-  arguments would be wrong. If `func` already carries `@validate_call`/`@log_this`
-  layers, they're peeled off first (see `unwrap_log_this_and_validate_call`).
+* `func` (*Callable[..., Any]*): The source function to wrap into an Action class.
+  Its first parameter (or `main_param`, if given) becomes the Action's main pipeline
+  input (`__call__`/`acall`); every other parameter becomes a constructor (`__init__`)
+  parameter. If `func` is already an `Action` subclass, it is returned unchanged;
+  if it is an `Action` instance, `raise_action_instance_error` is raised instead.
+  If `func` already carries `@validate_call` and/or `@log_this` layers, they are
+  peeled off first (see `unwrap_log_this_and_validate_call`). If `func` is a native
+  `async def`, the resulting class is async-native too.
 * `main_param` (*str | None*): Name of the parameter to use as the main pipeline
-  input. `None` (the default) means "the first parameter".
+  input. Defaults to `None`, meaning "the first parameter".
 * `use_validations` (*bool*): If `True` (default), requires `func` to be fully
-  annotated and wraps `act`/`__init__`/`__call__` with `validate_call`; the resulting
-  class also carries `_input_type`/`_output_type` introspection attributes. If
-  `False`, no annotation is required and no validation is applied — a fast,
-  low-friction path for prototypes.
+  annotated and wraps `act`/`__init__`/`__call__` (and `acall`, for an async source)
+  with `validate_call`; the resulting class also carries `_input_type`/`_output_type`
+  introspection attributes. If `False`, no annotation is required and no validation is
+  applied — a fast, low-friction path for prototypes.
 * `use_logging` (*bool*): If `True` (default), wraps `act` with `log_this` on top of
   `validate_call` (entry/exit/timing/exception logging).
 * `class_name` (*str | None*): Explicit name for the generated class. Defaults to
   `func.__name__` converted from `snake_case` to `PascalCase`. Required for callables
   with no usable `__name__` (lambdas, `functools.partial`).
+* `_validate_call` (*bool*): Internal bypass switch for the `@validate_call` decorator
+  applied to `create_action` itself.
 
 **Returns:**
 
-* `type[Action]`: A new `Action` subclass.
+* `type[Action]`: A new `Action` subclass whose instances are constructed with every
+  parameter of `func` except the main one (`MyAction(other_param=...)`), and called
+  with the main parameter alone — synchronously (`instance(main_value)`) for a `def`
+  source, or via `await instance.acall(main_value)` for an `async def` source.
 
 **Example usage:**
 
@@ -91,7 +107,7 @@ Greet(prefix="Hello")({"name": "Ann"})   # -> "Hello, Ann!"
 **Under the hood** *(the orchestration steps, each delegated to its own helper below)*:
 
 ```python
-def create_action(func, *, main_param=None, use_validations=True, use_logging=True, class_name=None):
+def create_action(func, *, main_param=None, use_validations=True, use_logging=True, class_name=None, _validate_call=True):
     # 1. Pass an already-built Action class straight through
     if isinstance(func, type) and issubclass(func, Action):
         return func
@@ -114,6 +130,7 @@ def create_action(func, *, main_param=None, use_validations=True, use_logging=Tr
     _class_name = resolve_class_name(_func, class_name)
     _main_param, _other_params = resolve_param(_params, main_param, _func)
     _return_annotation = _signature.return_annotation
+    _is_async = inspect.iscoroutinefunction(_func)
 
     # 7. Validate the received annotations, if requested
     if use_validations:
@@ -122,12 +139,16 @@ def create_action(func, *, main_param=None, use_validations=True, use_logging=Tr
 
     # 8. Build the pieces of the class dict
     init, slots = create_init_and_slots(_other_params)
-    call = create_call(_main_param, _other_params, _return_annotation)
+    call, acall = create_call(_main_param, _other_params, _return_annotation, _is_async)
     act = create_act(_main_param, _other_params, _return_annotation, _func)
 
     # 9-11. Apply validation, logging, and turn act into a staticmethod
     if use_validations:
-        init, call, act = validate_call(init), validate_call(call), validate_call(act)
+        init = validate_call(init)
+        call = validate_call(call)
+        act = validate_call(act)
+        if acall is not None:
+            acall = validate_call(acall)
     if use_logging:
         act = log_this(act)
     act = staticmethod(act)
@@ -135,6 +156,8 @@ def create_action(func, *, main_param=None, use_validations=True, use_logging=Tr
     # 12-14. Assemble and build the class
     attrs = {"__doc__": _func.__doc__, "__slots__": slots, "__init__": init,
              "__call__": call, "act": act, "_main_name": _main_param.name}
+    if acall is not None:
+        attrs["acall"] = acall
     if use_validations:
         attrs["_input_type"] = _main_param.annotation
         attrs["_output_type"] = _return_annotation
@@ -326,27 +349,30 @@ def create_init_and_slots(params):
 
 ### `create_call`
 
-Synthesizes `__call__` — the `Action`'s single pipeline entry point. Only ever takes
-`main_param`; the other parameters were already bound onto `self` at construction and
-are read back off it.
+Synthesizes `__call__` — and, for an async-sourced action, `acall` too.
 
 **Parameters:**
 
-* `main_param` (*inspect.Parameter*): `__call__`'s only real argument (besides
-  `self`).
-* `other_params` (*list[inspect.Parameter]*): Read off `self`, forwarded into
-  `self.act(...)`.
-* `return_annotation` (*Any*): Used to annotate `__call__`'s own return type and
-  docstring.
+* `main_param` (*inspect.Parameter*): The parameter that becomes the sole real argument
+  (besides `self`) on both generated entry points.
+* `other_params` (*list[inspect.Parameter]*): Read off `self` (already bound there by
+  `__init__`) and forwarded into `self.act(...)`.
+* `return_annotation` (*Any*): Used to annotate both generated methods' return type
+  and docstring.
+* `is_async` (*bool*): Whether `act` is a native `async def`. Determines entry point
+  generation and `__call__` behavior.
 
 **Returns:**
 
-* `Callable[..., Any]`: The generated `__call__`.
+* `tuple[Callable[..., Any], Callable[..., Any] | None]`: A `(call, acall)` tuple.
+  For synchronous sources (`is_async=False`), `acall` is `None`. For async sources
+  (`is_async=True`), `call` raises `AsyncActionRequiresAcallError` immediately, and
+  `acall` is the generated coroutine function.
 
 **Under the hood:**
 
 ```python
-def create_call(main_param, other_params, return_annotation):
+def create_call(main_param, other_params, return_annotation, is_async):
     namespace = {}
     main_name = main_param.name
     call_param = main_name
@@ -354,25 +380,48 @@ def create_call(main_param, other_params, return_annotation):
 
     if main_param.annotation is not EMPTY:
         namespace["_main_annotation"] = main_param.annotation
-        call_param += ": _main_annotation"
+        call_param += f": _main_annotation"
 
     for param in other_params:
         act_arguments.append(f"{param.name}=self.{param.name}")
+
     act_arguments.append("_validate_call=_validate_call")
 
     call_return = ""
     if return_annotation is not EMPTY:
         namespace["_return_annotation"] = return_annotation
-        call_return = " -> _return_annotation"
+        call_return = f" -> _return_annotation"
 
-    source = (
+    docstring = build_call_docstring(main_param, return_annotation)
+
+    if not is_async:
+        source = (
+            f"def __call__(self, {call_param}, *, _validate_call: bool = True){call_return}:\n"
+            f"    return self.act({', '.join(act_arguments)})"
+        )
+        exec(source, namespace)
+        generated_call = namespace["__call__"]
+        generated_call.__doc__ = docstring
+        return generated_call, None
+
+    call_namespace = dict(namespace)
+    call_namespace["_raise_async_action_requires_acall_error"] = raise_async_action_requires_acall_error
+    call_source = (
         f"def __call__(self, {call_param}, *, _validate_call: bool = True){call_return}:\n"
-        f"    return self.act({', '.join(act_arguments)})"
+        f"    return _raise_async_action_requires_acall_error(self)"
     )
-    exec(source, namespace)
-    generated_call = namespace["__call__"]
-    generated_call.__doc__ = build_call_docstring(main_param, return_annotation)
-    return generated_call
+    exec(call_source, call_namespace)
+    generated_call = call_namespace["__call__"]
+
+    acall_namespace = dict(namespace)
+    acall_source = (
+        f"async def acall(self, {call_param}, *, _validate_call: bool = True){call_return}:\n"
+        f"    return await self.act({', '.join(act_arguments)})"
+    )
+    exec(acall_source, acall_namespace)
+    generated_acall = acall_namespace["acall"]
+
+    return generated_call, generated_acall
 ```
 
 > `create_action` decorates the class this way so it satisfies `Action`'s abstract
@@ -401,7 +450,7 @@ of the validation bypass mechanism.
 
 * `Callable[..., Any]`: A real function with `func`'s exact parameter names,
   annotations, docstring, `__name__`, and defaults, plus the one added bypass
-  parameter.
+  parameter. If `func` is a native `async def`, `act` is generated as `async def` too.
 
 **Under the hood:**
 
@@ -427,9 +476,13 @@ def create_act(main_param, other_params, return_annotation, func):
         namespace["_return_annotation"] = return_annotation
         return_src = " -> _return_annotation"
 
+    is_async = inspect.iscoroutinefunction(func)
+    def_keyword = "async def" if is_async else "def"
+    call_prefix = "await " if is_async else ""
+
     source = (
-        f"def act(*, {', '.join(params_entry)}, _validate_call: bool = True){return_src}:\n"
-        f"    return __func__({', '.join(call_args)})"
+        f"{def_keyword} act(*, {', '.join(params_entry)}, _validate_call: bool = True){return_src}:\n"
+        f"    return {call_prefix}__func__({', '.join(call_args)})"
     )
     exec(source, namespace)
     generated_act = namespace["act"]

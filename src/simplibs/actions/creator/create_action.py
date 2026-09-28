@@ -72,23 +72,27 @@ def create_action(
     Args:
         func: The source function to wrap into an Action class. Its
             first parameter (or `main_param`, if given) becomes the
-            Action's main pipeline input (`__call__`); every other
-            parameter becomes a constructor (`__init__`) parameter.
-            If `func` is already an `Action` subclass, it is returned
-            unchanged; if it is an `Action` instance, a diagnostic error
-            is raised instead. If `func` already carries `@validate_call`
-            and/or `@log_this` layers (in any order or depth), they are
-            peeled off first — see the design notes below.
+            Action's main pipeline input (`__call__`/`acall`); every
+            other parameter becomes a constructor (`__init__`)
+            parameter. If `func` is already an `Action` subclass, it is
+            returned unchanged; if it is an `Action` instance, a
+            diagnostic error is raised instead. If `func` already
+            carries `@validate_call` and/or `@log_this` layers (in any
+            order or depth), they are peeled off first — see the design
+            notes below. If `func` is a native `async def`, the
+            resulting class is async-native too — see the design notes
+            for exactly what that changes.
         main_param: Name of the parameter to use as the main
             pipeline input. Defaults to `None`, meaning "the first
             parameter".
         use_validations: If `True`, requires `func` to be fully annotated
             (every parameter and the return value) and wraps
-            `act`/`__init__`/`__call__` with `validate_call`; the
-            resulting class also carries `_input_type`/`_output_type`
-            introspection attributes. If `False`, no annotation is
-            required and no validation is applied — a fast, low-friction
-            path for prototypes.
+            `act`/`__init__`/`__call__` (and `acall`, for an async
+            source) with `validate_call`; the resulting class also
+            carries `_input_type`/`_output_type` introspection
+            attributes. If `False`, no annotation is required and no
+            validation is applied — a fast, low-friction path for
+            prototypes.
         use_logging: If `True`, wraps `act` with `log_this` on top of
             `validate_call` (entry/exit/timing/exception logging).
         class_name: Explicit name for the generated class.
@@ -103,7 +107,10 @@ def create_action(
         A new `Action` subclass whose instances are constructed with
         every parameter of `func` except the main one
         (`MyAction(other_param=...)`), and called with the main
-        parameter alone (`instance(main_value)`).
+        parameter alone — synchronously (`instance(main_value)`) for a
+        `def` source, or via `await instance.acall(main_value)` for an
+        `async def` source (whose synchronous `__call__` raises instead
+        — see the design notes).
     """
 
     # 1. Pass an already-built Action class straight through
@@ -128,6 +135,7 @@ def create_action(
     _class_name = resolve_class_name(_func, class_name)
     _main_param, _other_params = resolve_param(_params, main_param, _func)
     _return_annotation = _signature.return_annotation
+    _is_async = inspect.iscoroutinefunction(_func)
 
     # 7. Validate the received annotations, if requested
     if use_validations:
@@ -136,7 +144,7 @@ def create_action(
 
     # 8. Build the pieces of the class dict
     init, slots = create_init_and_slots(_other_params)
-    call = create_call(_main_param, _other_params, _return_annotation)
+    call, acall = create_call(_main_param, _other_params, _return_annotation, _is_async)
     act = create_act(_main_param, _other_params, _return_annotation, _func)
 
     # 9. Apply validation to the generated methods
@@ -144,6 +152,8 @@ def create_action(
         init = validate_call(init)
         call = validate_call(call)
         act = validate_call(act)
+        if acall is not None:
+            acall = validate_call(acall)
 
     # 10. Apply logging
     if use_logging:
@@ -159,8 +169,14 @@ def create_action(
         "__init__": init,
         "__call__": call,
         "act": act,
+        "is_async": _is_async,
         "_main_name": _main_param.name,
     }
+
+    # 12.1 Only an async source generates its own acall — a synchronous
+    #      class inherits Action's own default (to-thread bridge) instead.
+    if acall is not None:
+        attrs["acall"] = acall
 
     # 13. Add I/O type introspection attributes, only when validated
     if use_validations:
@@ -216,14 +232,55 @@ for why a fixed-point loop is needed, rather than one pass of each
 unwrap function) without bloating this file's own notes with something
 that isn't really about `create_action`'s own orchestration.
 
+## `_is_async` — one detection, shared by generators and class attributes
+`inspect.iscoroutinefunction(_func)` is computed exactly once, on the
+already-unwrapped source function, and passed into `create_call` as a
+plain flag. It is also explicitly injected into the generated class dictionary 
+as `is_async`, ensuring that the resulting `Action` subclass cleanly overrides 
+the base class default (`False`) when generated from an `async def` source.
+`create_act` performs the identical check independently on
+the same `_func` (see its own design notes for why the duplication is
+intentional) — both generators are working from the same, single
+unwrapped source, so there is no risk of the two ever disagreeing about
+whether this particular action is async.
+
+## What actually differs for an async source, end to end
+* `act` (from `create_act`) becomes `async def`, `await`-ing `__func__`.
+* `__call__` (from `create_call`) still exists — the abstract contract
+  on `Action` requires it — but raises immediately rather than silently
+  returning an un-awaited coroutine.
+* `acall` (also from `create_call`) is a real, generated coroutine
+  function, assigned onto the class in step 12.1 above. For a
+  synchronous source, `acall` stays `None` here and the class simply
+  inherits `Action`'s own default implementation (the to-thread bridge)
+  — nothing new needs assembling for the overwhelming majority of
+  actions, which remain purely synchronous exactly as before this
+  feature existed.
+* `use_validations`/`use_logging` apply uniformly either way — `acall`
+  gets the same `validate_call` wrapping `call`/`act`/`init` already
+  receive, whenever it exists at all.
+
 ## `_input_type`/`_output_type` — conditional on `use_validations`
 These are only ever set inside the `if use_validations:` branch, after
 `validate_params_annotations`/`validate_return_annotations` have already
-guaranteed every annotation is real and supported.
+guaranteed every annotation is real and supported. Unaffected by whether
+the source is sync or async — the main parameter's annotation and the
+return annotation mean the same thing either way.
 
 ## Why `create_action` decorates itself with `@validate_call`
 Dogfooding — `create_action`'s own parameters are exactly the kind of
 plain, fully-typed parameters `validate_call` is meant to check.
 `_validate_call` on `create_action` itself is the same bypass hook every
 other `validate_call`-decorated function in this ecosystem carries.
+
+## What this file deliberately leaves to containers themselves
+`create_action` gives an async-sourced action's own `act`/`acall` a
+correct, efficient async path. It does NOT — and structurally cannot —
+make a container like `sequence`/`parallel`/`fallback` correctly await
+its OWN child steps concurrently or without unnecessary thread hops;
+that requires knowing what those containers actually do with their
+children, which is bespoke per container. See `sequence.py`/
+`parallel.py`/`fallback.py`'s own design notes for their hand-written
+`acall` overrides, and `Action.py`'s design notes for why its own
+default `acall` is deliberately not asked to handle that case either.
 """

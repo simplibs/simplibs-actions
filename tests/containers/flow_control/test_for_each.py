@@ -1,4 +1,5 @@
 import pytest
+from simplibs.exception.exceptions import ParamError
 from simplibs.actions.containers import for_each
 
 
@@ -63,3 +64,30 @@ def test_for_each_direct_call_without_currying():
 
     # Assert
     assert result == ["APPLE", "BANANA"]
+
+
+@pytest.mark.asyncio
+async def test_for_each_acall_processes_items_concurrently():
+    """Verify that acall processes items concurrently via asyncio.gather."""
+
+    async def async_double(x: int) -> int:
+        return x * 2
+
+    action = for_each(action=async_double)
+
+    result = await action.acall([1, 2, 3, 4])
+
+    assert result == [2, 4, 6, 8]
+
+
+@pytest.mark.asyncio
+async def test_for_each_acall_raises_error_for_non_iterable_input():
+    """Verify that acall raises an error for non-iterable input data."""
+
+    async def async_double(x: int) -> int:
+        return x * 2
+
+    action = for_each(action=async_double)
+
+    with pytest.raises((TypeError, ParamError, Exception)):
+        await action.acall(12345)

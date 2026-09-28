@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.0] - 2026-09-28
+
+### ✨ Added
+
+#### Async Execution Support (`acall`)
+
+* Native async support via `acall` across the `Action` interface and core
+  containers.
+* Synchronous misuse guard: invoking `action(data)` on an async-sourced Action
+  explicitly raises a structured `ParamError` (via
+  `raise_async_action_requires_acall_error`) directing the user to
+  `await action.acall(data)`.
+
+#### Testing Ecosystem Updates (`simplibs.actions.testing`)
+
+* **Sync & Native Async Dual Support**: `assert_action`, `assert_action_output`,
+  and `assert_action_raises` transparently support testing both sync and async
+  actions (driven via `asyncio.run(action.acall(data))`).
+* **Sync-Misuse Guard Verification**: `assert_action` automatically verifies the
+  `ParamError` misuse guard when `deep_check` is enabled on an async action.
+
+---
+
 ## [0.1.0] - 2026-09-25
 
 ### ✨ Added

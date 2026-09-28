@@ -1,8 +1,7 @@
 import inspect
 from typing import Any, Callable
 from simplibs.exception import ParamError
-# Outers
-from ..constants import EMPTY
+from simplibs.sentinels import EMPTY
 # Inners
 from ._verify_type_is_validatable import _verify_type_is_validatable
 

@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Iterable
 # Outers
 from ...decorator import to_action
@@ -26,6 +27,36 @@ def for_each(
     return [inner(item) for item in items]
 
 
+async def _for_each_acall(self, data: Iterable[Any]) -> list[Any]:
+    """Async counterpart of `for_each`'s own body.
+
+    Runs `action` over every item CONCURRENTLY via `asyncio.gather` —
+    same reasoning as `parallel`'s own `acall`: mapping the same action
+    across many independent items is exactly the shape of work async
+    concurrency benefits most, and `asyncio.gather` preserves input
+    order in its results regardless of which item's coroutine actually
+    finishes first.
+    """
+
+    # 1. Validate that input data is iterable, materializing it up front
+    #    (asyncio.gather needs concrete coroutines to schedule, so the
+    #    items must be known before any of them can be awaited)
+    try:
+        items = list(data)
+    except TypeError:
+        raise_not_iterable(data)
+
+    # 2. Normalize the inner action
+    inner = as_action(self.action)
+
+    # 3. Await every item's result concurrently, in the original order
+    return list(await asyncio.gather(*(inner.acall(item) for item in items)))
+
+
+# Attach the hand-written async counterpart directly onto the generated class —
+# see design notes for why this can't be derived generically by create_action.
+for_each.acall = _for_each_acall
+
 for_each = for_each
 """
 Applies `action` to every item of an iterable input.
@@ -38,6 +69,11 @@ Main Param:
 
 Output:
     list[Any]: One result per input item, in order.
+
+Callable both synchronously (`for_each(action=...)(items)`, items
+processed one after another) and asynchronously
+(`await for_each(action=...).acall(items)`, items processed
+CONCURRENTLY via `asyncio.gather`).
 
 Example:
     >>> for_each(action=double)([1, 2, 3])
@@ -55,4 +91,24 @@ genuine contract on `data` — it must be iterable. Kept as `Iterable[Any]`
 in the annotation; `IsTyping` already decomposes `Iterable[Any]` on its
 own (a supported origin), so `for_each` gets a meaningful type check for
 free via `create_action`, ahead of the `iter()` call itself.
+
+## Why `acall` is hand-attached, and why it uses `asyncio.gather`
+Same underlying reasoning as `parallel`'s own design notes for why
+`Action`'s default `acall` would be wrong here (it would process the
+whole loop inside one thread, and call each item's raising synchronous
+`__call__` instead of its `.acall(...)`) — and the same positive reason
+to prefer `asyncio.gather` over a plain sequential `await` loop:
+`for_each` over an I/O-bound `action` is architecturally identical to
+`parallel` over I/O-bound branches — many independent invocations of the
+same shape, with no dependency between them — so it gets the identical
+concurrency benefit.
+
+## Why `items = list(data)`, not `iter(data)`, in the async path
+The synchronous body only ever needs one item at a time and can stream
+through a lazy iterator. `asyncio.gather` needs every coroutine handed
+to it up front, which means every item must already be known before any
+of them can be awaited — hence materializing the full list first. The
+`TypeError` guard behaves identically either way: a non-iterable `data`
+fails immediately at the `list(data)`/`iter(data)` call itself, before
+any item is ever touched.
 """

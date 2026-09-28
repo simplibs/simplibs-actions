@@ -1,6 +1,8 @@
 """
 Tests for create_action — dynamically building an Action subclass from an ordinary function.
 """
+import pytest
+from simplibs.exception.exceptions import ParamError
 from simplibs.actions.base_class import Action
 from simplibs.actions.creator.create_action import create_action
 from simplibs.exception.exceptions import ParamError
@@ -105,3 +107,36 @@ def test_create_action_exposes_input_output_type_introspection():
 
     assert Greet._input_type is dict
     assert Greet._output_type is str
+
+
+def test_create_action_async_source_builds_async_action_class():
+    """Verify that create_action with an async function builds an async-native Action class."""
+
+    async def _async_greet(data: dict, prefix: str = "Hi") -> str:
+        return f"{prefix}, {data['name']}!"
+
+    AsyncGreet = create_action(_async_greet)
+
+    assert issubclass(AsyncGreet, Action)
+    assert AsyncGreet._input_type is dict
+    assert AsyncGreet._output_type is str
+
+    instance = AsyncGreet(prefix="Hello")
+
+    # Calling synchronously via __call__ must raise ParamError
+    with pytest.raises(ParamError):
+        instance({"name": "Bob"})
+
+
+@pytest.mark.asyncio
+async def test_create_action_async_source_executes_via_acall():
+    """Verify that an async Action created via create_action executes properly via acall."""
+
+    async def _async_greet(data: dict, prefix: str = "Hi") -> str:
+        return f"{prefix}, {data['name']}!"
+
+    AsyncGreet = create_action(_async_greet)
+    instance = AsyncGreet(prefix="Hello")
+
+    result = await instance.acall({"name": "Bob"})
+    assert result == "Hello, Bob!"

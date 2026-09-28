@@ -1,7 +1,6 @@
 import inspect
 from typing import Any, Callable
-# Outers
-from ..constants import EMPTY
+from simplibs.sentinels import EMPTY
 # Inners
 from ._helpers import build_init_docstring
 

@@ -1,6 +1,7 @@
+import inspect
 from typing import Any, Sequence
 from simplibs.sentinels import UNSET, UnsetType
-from simplibs.exception import ValidationError
+from simplibs.exception import ParamError, ValidationError
 # Outers
 from ..base_class import Action
 # Inners
@@ -23,6 +24,7 @@ def assert_action(
     action_class: type[Action] | None = None,
     invalid_init_params: list[tuple[tuple[Any, ...], dict[str, Any]]] | None = None,
     construction_exception_type: type[Exception] | Sequence[type[Exception] | None] = ValidationError,
+    is_async: bool | None = None,
     verbose: bool = True,
     intro: str = "",
     deep_check: bool = True,
@@ -31,19 +33,8 @@ def assert_action(
 
     Runs the battery of checks any Action instance should satisfy — whether one of this
     library's own containers (guard, sequence, parallel, fallback, retry, tap, ...) or one
-    built by a downstream user via @to_action/create_action in their own code. Mirrors the
-    Facade pattern already established by simplibs-rules' assert_rule_contract and
-    simplibs-exception's assert_exception_function: one call, fed with data, exercises
-    every deterministic corner of the contract.
-
-    An Action instance is directly callable, so most of the actual value-execution checking
-    here is delegated straight to simplibs-exception's own testing primitives rather than
-    reimplemented.
-
-    What this deliberately does NOT do: assert anything about business-logic correctness
-    beyond the exact valid/invalid value pairs supplied — no generic tool can infer that.
-    It is expected to be supplied by the caller here, or covered by additional, focused
-    tests written alongside this call — not folded into the generic contract.
+    built by a downstream user via @to_action/create_action in their own code. Supports
+    both sync and native async def actions.
 
     Args:
         subtests: The native pytest subtests fixture manager instance.
@@ -65,14 +56,13 @@ def assert_action(
             on construction via action_class(*args, **kwargs). Requires action_class, and
             is only run when deep_check is True.
         construction_exception_type: Asserted against each exception raised on
-            construction. Defaults to ValidationError (see assert_action_construction's
-            own design notes for why). Only used when action_class + invalid_init_params
-            are given.
+            construction. Defaults to ValidationError. Only used when action_class +
+            invalid_init_params are given.
+        is_async: Explicit flag specifying whether the action is async. If None, auto-detected.
         verbose: If True, registers individual checks as isolated pytest subtests.
         intro: Optional prefix string added to the generated subtest identity name.
         deep_check: If True, additionally verifies _input_type/_output_type declaration
-            and (if action_class + invalid_init_params are given) the constructor's
-            ParamError guard.
+            and constructor parameter validation.
     """
     assert isinstance(action, Action), (
         f"assert_action expects an Action instance, got {type(action).__name__}."
@@ -80,6 +70,9 @@ def assert_action(
 
     action_name = type(action).__name__
     prefix = f"{intro}[{action_name}] " if intro == "" else f"{intro} "
+
+    if is_async is None:
+        is_async = getattr(action, "is_async", False)
 
     # 1. Valid inputs -> expected outputs
     if valid_values:
@@ -91,6 +84,7 @@ def assert_action(
             action,
             valid_values,
             expected_outputs,
+            is_async=is_async,
             verbose=verbose,
             intro=prefix,
         )
@@ -102,6 +96,7 @@ def assert_action(
             action,
             invalid_values,
             expected_exception_type=expected_exception_type,
+            is_async=is_async,
             verbose=verbose,
             intro=prefix,
         )
@@ -116,6 +111,18 @@ def assert_action(
             verbose=verbose,
             intro=prefix,
         )
+
+        # Sync-misuse guard check for async actions
+        if is_async and valid_values:
+            assert_action_raises(
+                subtests,
+                action,
+                [valid_values[0]],
+                expected_exception_type=ParamError,
+                is_async=False,
+                verbose=verbose,
+                intro=f"{prefix}[sync_misuse_guard] ",
+            )
 
         if action_class is not None and invalid_init_params:
             assert_action_construction(
@@ -137,7 +144,8 @@ The single entry point for testing any Action instance — this library's own co
 downstream user builds via @to_action/create_action in their own code. Mirrors the
 Facade pattern already established by assert_rule_contract (simplibs-rules) and
 assert_exception_function (simplibs-exception): one call, fed with data, exercises
-every deterministic corner of the contract.
+every deterministic corner of the contract. Fully supports both synchronous actions
+and native async def actions.
 
 ---
 
@@ -149,47 +157,59 @@ way to know what output a given input SHOULD produce. So this tool splits cleanl
 
 * **Fully generic / mechanical** (checked automatically): the object really is an Action;
   invalid inputs actually raise; _input_type/_output_type are declared when the caller
-  expects them to be; a misconfigured constructor raises ParamError.
+  expects them to be; a misconfigured constructor raises ValidationError/ParamError.
 * **Business-logic-specific** (must be supplied by the caller): what each valid input
   should produce (`expected_outputs`), and which invalid input should trigger which
   exception (`expected_exception_type`).
 
-This is exactly the boundary discussed before building this tool: it saves the
-boilerplate around calling/raising/subtesting, but the actual "is this the right answer"
-truth table is inherently the caller's to provide.
+This saves the boilerplate around calling, raising, subtesting, and async event-loop
+orchestration, while leaving the actual "is this the right answer" truth table
+inherently to the caller to provide.
 
-## 2. Toolkit Reuse Over Reimplementation
+## 2. Sync & Native Async Dual Support
 
-Because an Action instance is directly callable (`action(data)`), the negative-path check
-(`assert_action_raises`) is a near-direct pass-through to simplibs-exception's own
-`assert_function_raises` — no raise/type-check logic is duplicated here. Only the
-positive-path output check (`assert_action_output`) needed a purpose-built blade, since
-none of the existing testing primitives in this ecosystem check a return value against an
-expectation (they only check "does/doesn't raise").
+With native async support (`acall`), `assert_action` auto-detects whether the target
+action is async (or respects the explicit `is_async` override). Both positive-path outputs
+(`assert_action_output`) and negative-path exceptions (`assert_action_raises`) transparently
+execute through the async channel (`acall`) when testing an async action, isolating
+event-loop execution cleanly via `asyncio.run`.
 
-## 3. deep_check Scope
+## 3. Sync-Misuse Guard Verification for Async Actions
+
+Calling an async action directly via standard synchronous `__call__` (`action(data)`) is a
+contract violation that must raise `ParamError` (via `raise_async_action_requires_acall_error`).
+When `deep_check` is enabled and `valid_values` are provided for an async action, `assert_action`
+automatically verifies this misuse guard against a sample input (`is_async=False`), ensuring
+the Action enforces its async boundary strictly.
+
+## 4. Toolkit Reuse Over Reimplementation
+
+Because negative execution paths are wrapped inside zero-arg callable closures, the
+negative-path check (`assert_action_raises`) relies directly on `simplibs-exception`'s own
+`assert_function_raises` primitive — no raise/type-check logic is duplicated here.
+
+## 5. deep_check Scope
 
 Consistent with assert_rule_contract and assert_exception_function's own deep_check split:
 the basic execution contract (valid inputs succeed with the right output, invalid inputs
 raise) always runs. deep_check additionally gates:
   - _input_type/_output_type declaration checks (meaningless for actions built with
     use_validations=False, so this is opt-in rather than assumed).
-  - the optional constructor ParamError sweep (opt-in via action_class +
+  - the optional constructor parameter sweep (opt-in via action_class +
     invalid_init_params, mirroring assert_rule_param_error's own opt-in design for
     exactly the same reason: not every action has constructor parameters worth
     misuse-testing).
 
-## 4. Fail-Fast Type Guard
+## 6. Fail-Fast Type Guard
 
 Asserts isinstance(action, Action) immediately, before any check runs — same rationale as
 assert_rule_contract and assert_rule_is_valid: a misuse of this helper itself should
 produce one clear error, not a cascade of confusing subtest failures deep inside a loop.
 
-## 5. Scope Boundary — What Comes Next, Deliberately Not Here
+## 7. Scope Boundary — What Comes Next, Deliberately Not Here
 
-The pipeline-level type-compatibility linter sketched earlier (inspect_pipeline,
-assert_pipeline_compatible) is a different tool solving a different problem — checking
-that a whole composed pipeline's steps fit together, not that one action's own contract
-holds. It stays a separate, later addition; assert_action only ever looks at one action
-at a time.
+The pipeline-level type-compatibility linter (inspect_pipeline, assert_pipeline_compatible)
+is a different tool solving a different problem — checking that a whole composed
+pipeline's steps fit together, not that one action's own contract holds. It stays a
+separate, later addition; assert_action only ever looks at one action at a time.
 """
