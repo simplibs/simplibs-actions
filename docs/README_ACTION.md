@@ -125,8 +125,7 @@ result = await my_action.acall(some_input)
 ```python
 async def acall(self, data: Any, /) -> Any:
     """Run this action asynchronously over `data` and return the result."""
-    import asyncio
-    return await asyncio.to_thread(self, data)
+    return await asyncio.to_thread(self.__call__, data)
 ```
 
 > **Note on Async-Sourced Actions:** Actions built from `async def` functions set
@@ -166,7 +165,7 @@ pipeline("  hello  ")
 ```python
 def then(self, next_step: Any) -> "Action":
     from ..containers.operators.compose_class import SequenceCompose
-    return SequenceCompose.compose(self, self.resolve_action(next_step))
+    return SequenceCompose.compose(first=self, second=self.resolve_action(next_step))
 
 def __rshift__(self, next_step: Any) -> "Action":
     return self.then(next_step)
@@ -205,7 +204,7 @@ both("Hi")   # -> ("HI", "hi")
 ```python
 def __and__(self, other: Any) -> "Action":
     from ..containers.operators.compose_class import ParallelCompose
-    return ParallelCompose.compose(self, self.resolve_action(other))
+    return ParallelCompose.compose(first=self, second=self.resolve_action(other))
 ```
 
 [▲ Back to top](#-table-of-contents)
@@ -240,7 +239,7 @@ resilient(raw_input)   # -> default_value's result, if risky_parse raises
 ```python
 def __or__(self, other: Any) -> "Action":
     from ..containers.operators import fallback
-    return fallback(self, self.resolve_action(other))
+    return fallback(action=self, on_error=self.resolve_action(other))
 ```
 
 [▲ Back to top](#-table-of-contents)
@@ -339,12 +338,12 @@ def resolve_action(obj: Any) -> "Action":
     # 2. A Rule instance — wrap it into the hard-gate container
     if isinstance(obj, Rule):
         from ..containers.flow_control import guard
-        return guard(obj)
+        return guard(rule=obj)
 
     # 3. Any other callable — wrap it into the plain-transformer adapter
     if callable(obj):
         from ..containers.wrappers import lambda_action
-        return lambda_action(obj)
+        return lambda_action(func=obj)
 
     # 4. Anything else is not a valid Action target
     return raise_invalid_action_target(obj)

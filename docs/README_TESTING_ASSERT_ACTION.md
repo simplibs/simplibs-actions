@@ -61,8 +61,8 @@ to the caller. Fully supports both synchronous and native `async def` actions.
 ## 🧭 Execution Flow
 
 1. **Fail-fast type guard** — `action` must be an `Action` instance.
-2. **Auto-detection of async execution** — checks `inspect.iscoroutinefunction(action.acall)`
-   unless `is_async` is explicitly passed.
+2. **Auto-detection of async execution** — reads \action.is_async` 
+   unless `is_async` is explicitly passed.`
 3. **Output check** *(if `valid_values` given)* — delegated to
    [`assert_action_output`](#assert_action_output).
 4. **Raises check** *(if `invalid_values` given)* — delegated to
@@ -96,7 +96,6 @@ assert_action(
     async_greet_action,
     valid_values=[{"name": "Ann"}],
     expected_outputs=["Hi, Ann!"],
-    is_async=True,
 )
 
 # 3. Opting into the constructor-guard sweep too
@@ -144,7 +143,7 @@ assert_action(subtests, identity_action, deep_check=False)
   Default `ValidationError` — see [`assert_action_construction`](#assert_action_construction)
   for why.
 * **`is_async`** (`bool | None`): Default `None`. Explicitly specifies whether the action
-  is async. If `None`, auto-detected via `acall`.
+  is async. If `None`, read from `action.is_async`.
 * **`verbose`** (`bool`): Default `True`. Registers individual checks as isolated
   pytest subtests.
 * **`intro`** (`str`): Default `""`. Prefix for generated subtest names.

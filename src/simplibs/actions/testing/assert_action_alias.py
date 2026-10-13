@@ -63,8 +63,6 @@ def assert_action_alias(
             )
 
 
-from simplibs.sentinels import UNSET
-
 _DESIGN_NOTES = """
 # assert_alias (Alias Identity & Contract Verification)
 

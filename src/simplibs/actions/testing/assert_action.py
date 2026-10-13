@@ -1,4 +1,3 @@
-import inspect
 from typing import Any, Sequence
 from simplibs.sentinels import UNSET, UnsetType
 from simplibs.exception import ParamError, ValidationError

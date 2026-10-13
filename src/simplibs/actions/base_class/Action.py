@@ -237,10 +237,7 @@ by construction.
 return either `Rule` or `Action`, depending on the right-hand operand's
 type. This is already handled on the `Rule` side via a structural
 `_NotARule` `Protocol` plus `@overload` pairs on every binary operator
-(`__and__`/`__or__`/`__rand__`/`__ror__`) — see `Rule.py`'s own design
-notes, section 6, for why a `Protocol` is used instead of importing
-`Action` directly (keeping `simplibs-validate` independent of
-`simplibs-actions`, even for typing purposes).
+(`__and__`/`__or__`/`__rand__`/`__ror__`).
 
 ## `__not_rule__` remains unchanged
 

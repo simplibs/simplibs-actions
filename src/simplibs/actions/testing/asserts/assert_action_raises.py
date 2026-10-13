@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 from typing import Any, Callable, Sequence
 from simplibs.sentinels import UNSET
 from simplibs.exception.testing import assert_function_raises
@@ -30,7 +29,7 @@ def assert_action_raises(
             matching invalid_values index-by-index (use None to skip specific indices,
             i.e. accept any exception for that index).
         is_async: Explicit flag specifying whether the action is async. If None, it is
-            auto-detected via inspect.iscoroutinefunction(action.acall).
+            read from `action.is_async`.
         verbose: Enables isolated pytest subtest tracking for each checked value.
         intro: Optional prefix string added to generated subtest identity names.
 
@@ -47,8 +46,10 @@ def assert_action_raises(
             "expected_exception_type sequence must have the same length as invalid_values."
         )
 
+    # Read the flag every Action carries. `Action.acall` is always `async def` (even for a
+    # sync action), so inspect.iscoroutinefunction(action.acall) would be True for every action.
     if is_async is None:
-        is_async = inspect.iscoroutinefunction(getattr(action, "acall", None))
+        is_async = getattr(action, "is_async", False)
 
     def make_execution_call(val: Any) -> Callable[[], Any]:
         if is_async:
@@ -86,4 +87,7 @@ on async actions.
   `assert_rule_build_exception`'s expected_error_name/expected_exception_type — a single
   class applies uniformly, a Sequence lets each invalid_values entry assert a different
   exception type.
+* **Async Detection Reads `is_async`:** Not `inspect.iscoroutinefunction(action.acall)` — the base
+  `Action.acall` is always `async def`, so that check would be True for every action and a sync
+  action would be tested through the thread bridge instead of its real `__call__`.
 """

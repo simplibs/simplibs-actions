@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 from typing import Any
 from simplibs.exception.testing import maybe_subtest
 # Outers
@@ -27,7 +26,7 @@ def assert_action_output(
         expected_outputs: Outputs expected for each corresponding entry in valid_values
             (must be the same length).
         is_async: Explicit flag specifying whether the action is async. If None, it is
-            auto-detected via inspect.iscoroutinefunction(action.acall).
+            read from `action.is_async`.
         verbose: Enables isolated pytest subtest tracking for each checked value.
         intro: Optional prefix string added to generated subtest identity names.
 
@@ -40,8 +39,10 @@ def assert_action_output(
             f"(got {len(valid_values)} and {len(expected_outputs)})."
         )
 
+    # Read the flag every Action carries. `Action.acall` is always `async def` (even for a
+    # sync action), so inspect.iscoroutinefunction(action.acall) would be True for every action.
     if is_async is None:
-        is_async = inspect.iscoroutinefunction(getattr(action, "acall", None))
+        is_async = getattr(action, "is_async", False)
 
     for index, (value, expected) in enumerate(zip(valid_values, expected_outputs)):
         with maybe_subtest(
@@ -69,8 +70,9 @@ Supports both synchronous (`action(value)`) and asynchronous (`await action.acal
 actions.
 
 ## Design Choices
-* **Dual Sync/Async Execution Support:** Auto-detects `is_async` via `acall` or accepts an
-  explicit override. Async execution is driven seamlessly via `asyncio.run(action.acall(value))`.
+* **Dual Sync/Async Execution Support:** Reads `is_async` from the action (or accepts an
+  explicit override). Not detected from `acall`: the base `Action.acall` is always `async def`,
+  so that check would be True for every action, sync ones included. Async execution is driven seamlessly via `asyncio.run(action.acall(value))`.
 * **Index-Paired Lists, Not (input, output) Tuples:** Matches the calling convention of
   `assert_rule_contract`'s `valid_values`/`invalid_values` (parallel lists) rather than
   introducing a new tuple-pair shape.

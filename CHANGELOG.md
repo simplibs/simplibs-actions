@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.1] - 2026-10-14
+
+### 🐛 Fixed
+
+* `assert_action_output` and `assert_action_raises`: with `is_async=None` they now read
+  `action.is_async` instead of `inspect.iscoroutinefunction(action.acall)`, which was true for
+  every action (the base `Action.acall` is always `async def`). A sync action called directly
+  through these blades was tested via the async thread bridge instead of its real `__call__`.
+  (`assert_action` itself was not affected — it always passed `is_async` explicitly.)
+
+### 🔄 Changed
+
+* Requires `simplibs-validate>=0.3.1` and `simplibs-rules>=0.4.0`. `log_this` now shortens large
+  arguments and results by default, so logged actions no longer write whole large collections.
+
+### 📚 Documentation
+
+* `README_ACTION.md`: aligned the "Under the hood" snippets with the code (keyword arguments in
+  `compose`/`fallback`/`guard`/`lambda_action`, `acall` implementation).
+* `README_TESTING_ASSERT_ACTION.md`: async auto-detection reads `action.is_async`.
+
+---
+
 ## [0.2.0] - 2026-09-28
 
 ### ✨ Added
