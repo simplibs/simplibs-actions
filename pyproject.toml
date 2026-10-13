@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "simplibs-actions"
-version = "0.2.0"
+version = "0.2.1"
 description = "A composable Action pipeline system — chainable via >>, &, and if_matches, built on simplibs-rules."
 readme = "README.md"
 license = "MIT"
