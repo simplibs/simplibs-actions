@@ -68,7 +68,7 @@ def assert_action(
     )
 
     action_name = type(action).__name__
-    prefix = f"{intro}[{action_name}] " if intro == "" else f"{intro} "
+    prefix = f"{intro}[{action_name}] "
 
     if is_async is None:
         is_async = getattr(action, "is_async", False)

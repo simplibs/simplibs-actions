@@ -46,7 +46,8 @@ for those cases — it is the only way `create_action` can be used at all.
 ## Why plain `str.split("_")` + `str.capitalize()`, not a regex
 `snake_case` function names in this codebase are, by convention, plain
 lowercase words joined by single underscores — no digits-glued-to-letters
-edge cases, no leading/trailing underscores. A regex-based converter
+edge cases, leading/trailing underscores are harmless: 
+the empty parts vanish in join. A regex-based converter
 would handle more exotic input, but nothing in this codebase produces
 that input; the simple split/capitalize is exactly as capable as it
 needs to be, and is far easier to read than a regex would be for the

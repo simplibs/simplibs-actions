@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.2] - 2026-10-15
+
+### 🐛 Fixed
+
+* **Generated actions logged under a logger named `unknown`.** The `act` built by `create_act`
+  had no `__module__` (an `exec`-built function has none), so `log_this` fell back to `"unknown"`
+  for every action and the records never followed the application's own logging configuration.
+  `act` now carries its source function's `__module__`, so records appear under the module where
+  the source function lives.
+* **`for_each` consumed generators.** `data: Iterable[Any]` made the validation walk the input
+  twice, so a generator reached the body exhausted and the result was silently `[]`. The input is
+  now annotated as plain `Iterable`: a generator is processed lazily item by item on the
+  synchronous path, the same input `acall` already accepted.
+* `create_action` no longer fails with an `AttributeError` for a source callable without a
+  `__name__` (e.g. `functools.partial` together with `class_name`); the generated `act` keeps
+  its own name in that case.
+
+### 🔄 Changed
+
+* **`create_action` now validates its own arguments** (`@validate_call`). A non-callable `func`
+  or a wrongly typed option (e.g. `use_logging="no"`, previously silently truthy) raises a
+  structured `ValidationError` instead of a raw `TypeError` or being ignored. `_validate_call=False`
+  bypasses the check.
+* Validation errors of a generated action now name the action (`Function Greet.__call__()`
+  instead of `Function __call__()`): the generated `__init__`, `__call__` and `acall` carry
+  `<ClassName>.<method>` as `__qualname__`. The context of errors raised by `act` also carries
+  the module of the source function.
+
+### 📚 Documentation
+
+* Documented which logger an action logs to, and that `log_this` shortens large values.
+* Corrected the exception raised when an async action is called synchronously: it is a
+  `ParamError` (`ASYNC_ACTION_REQUIRES_ACALL`), not `AsyncActionRequiresAcallError`.
+* `&` / `parallel`: documented that branches run concurrently only through `acall`, one after
+  another when called synchronously.
+* `for_each`: documented that a generator is accepted.
+
+---
+
 ## [0.2.1] - 2026-10-14
 
 ### 🐛 Fixed

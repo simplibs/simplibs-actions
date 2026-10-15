@@ -89,7 +89,9 @@ result = my_action(some_input)
 ```python
 @abstractmethod
 def __call__(self, data: Any, /) -> Any:
-    """Run this action over `data` and return the result."""
+    """Run this action synchronously over `data` and return the result.
+    Raises ParamError (ASYNC_ACTION_REQUIRES_ACALL) if called on an async action.
+    """    
     raise NotImplementedError
 ```
 
@@ -177,8 +179,9 @@ def __rshift__(self, next_step: Any) -> "Action":
 
 ### `__and__`
 
-Runs this action and `other` in parallel over the **same** input — the method behind
-the `&` operator.
+Runs this action and `other` over the **same** input — the method behind the `&`
+operator. Called synchronously, the branches run one after another; through `acall`
+they run concurrently.
 
 **Parameters:**
 
@@ -203,6 +206,7 @@ both("Hi")   # -> ("HI", "hi")
 
 ```python
 def __and__(self, other: Any) -> "Action":
+    """Runs both actions over identical input data (concurrently only through `acall`): `actionA & actionB`."""
     from ..containers.operators.compose_class import ParallelCompose
     return ParallelCompose.compose(first=self, second=self.resolve_action(other))
 ```
@@ -270,7 +274,7 @@ no duplicated container-construction logic.
 ```python
 # is_integer is a Rule, not an Action — this is what makes the following work:
 checked = is_integer >> add_one     # verify, then continue
-parallel_check = is_integer & double  # verify AND execute in parallel
+parallel_check = is_integer & double  # verify AND run the action over the same data
 fallback_check = is_integer | safe_default
 ```
 
@@ -278,7 +282,7 @@ fallback_check = is_integer | safe_default
 
 ```python
 def __rand__(self, other: Any) -> "Action":
-    """Supports `rule & action` — verify AND execute in parallel."""
+    """Supports `rule & action` — verify AND run the action over the same data."""
     return self.resolve_action(other) & self
 
 def __ror__(self, other: Any) -> "Action":

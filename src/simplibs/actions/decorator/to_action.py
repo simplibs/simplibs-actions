@@ -43,7 +43,8 @@ def to_action(
             pipeline input.
         use_validations: Whether to apply `validate_call` to the
             generated methods.
-        use_logging: Whether to apply `log_this` to the `act` method.
+        use_logging: Whether to apply `log_this` to the `act` method (records go to
+            the logger of the source function's module).
         class_name: Custom name for the generated Action class.
 
     Example:

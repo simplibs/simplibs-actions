@@ -177,7 +177,8 @@ list.
 
 **Main Param:**
 
-* `data` (*Iterable[Any]*): The collection to iterate.
+* `data` (*Iterable*): The collection to iterate. A generator is accepted: the
+  synchronous path reads it lazily, `acall` materializes it first.
 
 **Output:**
 
@@ -202,7 +203,7 @@ for_each(action=double)([1, 2, 3])   # -> [2, 4, 6]
 
 ```python
 @to_action
-def for_each(data: Iterable[Any], action: Any) -> list[Any]:
+def for_each(data: Iterable, action: Any) -> list[Any]:
     try:
         items = iter(data)
     except TypeError:
@@ -281,10 +282,10 @@ to `SequenceCompose` — plain `parallel` nests when chained directly, changing 
 
 **Output:**
 
-* `tuple[Any, ...]`: One result per branch, in the same order as `branches`. 
-  Callable both synchronously (`parallel(...)(data)`) and asynchronously 
-  (`await parallel(...).acall(data)`). In async mode, all branches are executed 
-  **concurrently** via `asyncio.gather`.
+* `tuple[Any, ...]`: One result per branch, in the same order as `branches`.
+  Called synchronously (`parallel(...)(data)`), the branches run one after another;
+  through `acall` (`await parallel(...).acall(data)`) they run **concurrently** via
+  `asyncio.gather`.
 
 **Example usage:**
 

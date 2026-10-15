@@ -19,7 +19,7 @@ def create_act(
 
     Returns:
         A real function with `func`'s exact parameter names, annotations,
-        docstring, `__name__`, and defaults, plus one added keyword-only
+        docstring, `__name__`, `__module__`, and defaults, plus one added keyword-only
         `_validate_call: bool = True` parameter that is accepted and
         silently dropped — never forwarded into `func` itself. If `func`
         is a native `async def`, the generated `act` is `async def` too,
@@ -86,11 +86,18 @@ def create_act(
 
     # 8. Carry the source function's own __name__ over onto act too —
     #    see design notes for why this matters and why "act" itself
-    #    never appears here.
-    generated_act.__name__ = func.__name__
-    generated_act.__qualname__ = func.__name__
+    #    never appears here. A callable without a __name__ (functools.partial)
+    #    keeps the generated name instead of failing.
+    func_name = getattr(func, "__name__", None)
+    if func_name:
+        generated_act.__name__ = func_name
+        generated_act.__qualname__ = func_name
 
-    # 9. Return the generated object
+    # 9. Carry the source function's own __module__ over onto act as well —
+    #    exec leaves it None, see design notes for what depends on it.
+    generated_act.__module__ = getattr(func, "__module__", None)
+
+    # 10. Return the generated object
     return generated_act
 
 
@@ -144,6 +151,28 @@ reintroduce, in the name itself, the same kind of redundant self-
 reference that was deliberately left out of the docstring — "yes, this
 is act, wrapping func" is already obvious from where you're looking; it
 doesn't need to be repeated in every generated identifier too.
+
+## Why `act.__module__` is set to `func.__module__`
+A function built by `exec` in a namespace without `__name__` has
+`__module__ = None`. `log_this` takes its logger from `__module__`
+(`logging.getLogger(module)`) and falls back to a logger literally named
+`"unknown"` when there is none — so without this line EVERY generated action
+would log under `"unknown"`, a name no application ever configures, and its
+records would not follow the application's own logging setup
+(`logging.getLogger("my.package")`). Carrying `func`'s module makes the
+records appear exactly where they would if `func` itself had been decorated
+with `log_this`. `functools.wraps` (used by `validate_call`/`log_this`)
+copies `__module__` when it wraps `act`, so setting it here, before any
+wrapping, is enough.
+
+It also puts the module prefix into `validate_call`'s context text for `act`
+(`Function my.package.guard()` instead of `Function guard()`).
+
+## A source callable without a `__name__`
+`functools.partial` objects (documented as usable with `class_name`) have no
+`__name__`. Reading `func.__name__` unguarded would make `create_act` fail
+with an `AttributeError` for them, although the rest of `create_action` is
+built to accept them. Such an `act` simply keeps the generated name `"act"`.
 
 ## Async source functions — `act` mirrors `func`'s own sync/async nature
 `inspect.iscoroutinefunction(func)` decides everything here: an

@@ -8,7 +8,7 @@ Init Params:
     action (Action | Rule | Callable[[Any], Any]): Runs once per item.
 
 Main Param:
-    data (Iterable[Any]): The collection whose items are processed.
+    data (Iterable): The collection whose items are processed.
 
 Output:
     list[Any]: One result per input item, in order.

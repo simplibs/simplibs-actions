@@ -1,6 +1,6 @@
 import pytest
-from simplibs.exception.exceptions import ParamError
-from simplibs.actions.containers import for_each
+from simplibs.exception.exceptions import ParamError, ValidationError
+from simplibs.actions.containers.flow_control.for_each import for_each
 
 
 def test_for_each_applies_action_to_every_item_in_list():
@@ -91,3 +91,46 @@ async def test_for_each_acall_raises_error_for_non_iterable_input():
 
     with pytest.raises((TypeError, ParamError, Exception)):
         await action.acall(12345)
+
+
+def _numbers():
+    yield 1
+    yield 2
+    yield 3
+
+
+def test_for_each_processes_a_generator_item_by_item():
+    """Verify a generator is accepted by the synchronous path and every item is processed.
+
+    Regression: with `data: Iterable` the validation walked the generator (twice), so the body
+    received it exhausted and the result was silently `[]`.
+    """
+    action = for_each(action=lambda x: x * 2)
+
+    assert action(_numbers()) == [2, 4, 6]
+
+
+@pytest.mark.asyncio
+async def test_for_each_acall_processes_a_generator():
+    """Verify the async path accepts a generator too (both paths accept the same inputs)."""
+    action = for_each(action=lambda x: x * 2)
+
+    assert await action.acall(_numbers()) == [2, 4, 6]
+
+
+def test_for_each_still_processes_reiterable_containers():
+    """Verify lists, tuples, sets and ranges are processed as before."""
+    action = for_each(action=lambda x: x + 1)
+
+    assert action([1, 2]) == [2, 3]
+    assert action((1, 2)) == [2, 3]
+    assert action(range(2)) == [1, 2]
+    assert action({5}) == [6]
+
+
+def test_for_each_rejects_a_non_iterable_input():
+    """Verify a non-iterable value is rejected by the type check."""
+    action = for_each(action=lambda x: x)
+
+    with pytest.raises(ValidationError):
+        action(42)

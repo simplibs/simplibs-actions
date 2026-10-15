@@ -58,6 +58,7 @@ def create_action(
 # Actual implementation
 # ============================================================================
 
+@validate_call
 def create_action(
     func: Callable[..., Any],
     *,
@@ -95,6 +96,10 @@ def create_action(
             prototypes.
         use_logging: If `True`, wraps `act` with `log_this` on top of
             `validate_call` (entry/exit/timing/exception logging).
+            Records go to the logger of the module the source function
+            lives in (`func.__module__`), and `log_this` shortens large
+            arguments and results, so logging a list-returning action is
+            safe. Pass `False` to turn logging off for this action.
         class_name: Explicit name for the generated class.
             Defaults to `func.__name__` converted from `snake_case` to
             `PascalCase`. Required for callables with no usable
@@ -147,7 +152,15 @@ def create_action(
     call, acall = create_call(_main_param, _other_params, _return_annotation, _is_async)
     act = create_act(_main_param, _other_params, _return_annotation, _func)
 
-    # 9. Apply validation to the generated methods
+    # 9. Name the generated methods after the class, so diagnostics say which action
+    #    failed. Must stay BEFORE validate_call (step 10): functools.wraps copies
+    #    __qualname__ at wrap time, and validate_call builds its error context from it.
+    init.__qualname__ = f"{_class_name}.__init__"
+    call.__qualname__ = f"{_class_name}.__call__"
+    if acall is not None:
+        acall.__qualname__ = f"{_class_name}.acall"
+
+    # 10. Apply validation to the generated methods
     if use_validations:
         init = validate_call(init)
         call = validate_call(call)
@@ -155,14 +168,14 @@ def create_action(
         if acall is not None:
             acall = validate_call(acall)
 
-    # 10. Apply logging
+    # 11. Apply logging
     if use_logging:
         act = log_this(act)
 
-    # 11. Turn act into a static method
+    # 12. Turn act into a static method
     act = staticmethod(act)
 
-    # 12. Assemble the class dict
+    # 13. Assemble the class dict
     attrs: dict[str, Any] = {
         "__doc__": _func.__doc__,
         "__slots__": slots,
@@ -173,17 +186,17 @@ def create_action(
         "_main_name": _main_param.name,
     }
 
-    # 12.1 Only an async source generates its own acall — a synchronous
+    # 14. Only an async source generates its own acall — a synchronous
     #      class inherits Action's own default (to-thread bridge) instead.
     if acall is not None:
         attrs["acall"] = acall
 
-    # 13. Add I/O type introspection attributes, only when validated
+    # 15. Add I/O type introspection attributes, only when validated
     if use_validations:
         attrs["_input_type"] = _main_param.annotation
         attrs["_output_type"] = _return_annotation
 
-    # 14. Build the class
+    # 16. Build the class
     # noinspection PyTypeChecker
     return type(
         _class_name,
@@ -208,7 +221,6 @@ implement. Each real piece of work lives in its own file under
   (the three `exec`-based codegen functions that build the actual class
   members, each backed by its own `_helpers/` for anything beyond the
   bare codegen itself — see `creators/_helpers/`).
-* `constants/` — `EMPTY`, shared by every helper above.
 * `validations/` — parameter-kind and annotation checks, plus the
   `raise_*` diagnostic helpers, written in `simplibs-exception` style.
 
@@ -250,7 +262,7 @@ whether this particular action is async.
   on `Action` requires it — but raises immediately rather than silently
   returning an un-awaited coroutine.
 * `acall` (also from `create_call`) is a real, generated coroutine
-  function, assigned onto the class in step 12.1 above. For a
+  function, assigned onto the class in 14 above. For a
   synchronous source, `acall` stays `None` here and the class simply
   inherits `Action`'s own default implementation (the to-thread bridge)
   — nothing new needs assembling for the overwhelming majority of
@@ -266,6 +278,34 @@ These are only ever set inside the `if use_validations:` branch, after
 guaranteed every annotation is real and supported. Unaffected by whether
 the source is sync or async — the main parameter's annotation and the
 return annotation mean the same thing either way.
+
+## Logging — which logger, and what is written
+`use_logging=True` wraps `act` with `log_this`, which logs through
+`logging.getLogger(<module of the wrapped function>)`. `create_act` copies
+the source function's `__module__` onto the generated `act` (an `exec`-built
+function has none, and `log_this` would fall back to a logger named
+`"unknown"`), so records appear under the module where the source function
+lives and follow the application's own logging configuration. `log_this`
+also shortens large arguments and results by default (see its own
+`max_items`), which is why list-returning actions no longer need
+`use_logging=False`. `use_logging=False` remains the switch for an action
+that must not be logged at all (sensitive data, extremely frequent calls).
+
+## Why the generated methods are named here, not inside their creators
+`__init__`, `__call__` and `acall` are named `<ClassName>.<method>` in step 9. Left
+alone, an exec-built function is called just `__call__`, so `validate_call`'s error
+context reads `Function __call__()` — identical for every action in a pipeline, with
+nothing to say which step received bad data. Only this function knows the class name
+(`resolve_class_name`); `create_call`/`create_init_and_slots` work from parameters
+alone, so naming happens here rather than widening their signatures.
+
+`act` is deliberately different: `create_act` gives it `func`'s own name and module,
+because `act` IS `func` in a thin coat (see its design notes), and `log_this` reads
+its output from those. Two sources of truth, two places: `act` mirrors the function,
+the entry points mirror the class.
+
+Only `__qualname__` is set, never `__module__`: a module prefix would claim the class
+lives where the source function does, which it does not.
 
 ## Why `create_action` decorates itself with `@validate_call`
 Dogfooding — `create_action`'s own parameters are exactly the kind of

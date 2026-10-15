@@ -13,7 +13,7 @@ def parallel(
     data: Any,
     branches: tuple_not_empty,
 ) -> tuple[Any, ...]:
-    """Runs N actions over the same data in parallel."""
+    """Runs N actions over the same data and collects the results (concurrently when awaited through `acall`)."""
 
     # 1. Map each branch to an Action and execute sequentially over the same input data
     return tuple(

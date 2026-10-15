@@ -46,7 +46,7 @@ library composes with:
 
 ```python
 step_a >> step_b >> step_c     # sequence — thread output into the next input
-step_a & step_b & step_c       # parallel — same input, every branch, one flat tuple out
+step_a & step_b & step_c       # parallel — same input, every branch, one flat tuple out (concurrent via acall)
 step_a | step_b                # fallback — try step_a; on failure, run step_b instead
 ```
 
@@ -104,7 +104,7 @@ def lower(data: str) -> str:
 pipeline = strip() >> upper()
 pipeline("  hi  ")                        # -> "HI"
 
-# Parallel: same input, every branch, one flat tuple out
+# Parallel: same input, every branch, one flat tuple out (branches run concurrently only through acall)
 both = upper() & lower()
 both("Hi")                                 # -> ("HI", "hi")
 
@@ -175,7 +175,7 @@ class Action(ABC):
     @abstractmethod
     def __call__(self, data: Any, /) -> Any:
         """Run this action synchronously over `data` and return the result.
-        Raises AsyncActionRequiresAcallError if called on an async action.
+        Raises ParamError (ASYNC_ACTION_REQUIRES_ACALL) if called on an async action.
         """
         raise NotImplementedError
 
@@ -188,7 +188,7 @@ class Action(ABC):
         ...
 
     def __and__(self, other: Any) -> "Action":
-        """Executes actions in parallel over identical input data."""
+        """Runs both actions over identical input data (concurrently only through `acall`)."""
         ...
 
     def __or__(self, other: Any) -> "Action":
@@ -214,9 +214,9 @@ its own configuration parameters and called with one main input value.
 |-----------------|----------------|--------------------------------------------------------------------------------------------------------------------|
 | `guard`         | `flow_control` | Hard gate — passes data through, or raises, based on a `Rule`/condition.                                           |
 | `branch`        | `flow_control` | Soft conditional — runs one of two actions based on a condition, no error either way.                              |
-| `for_each`      | `flow_control` | Applies an action to every item of an iterable, collecting the results.                                            |
+| `for_each`      | `flow_control` | Applies an action to every item of an iterable (a generator is accepted), collecting the results. Items run concurrently through `acall`. |
 | `sequence`      | `operators`    | Chains any number of steps left to right. Self-flattening variant: `SequenceCompose`.                              |
-| `parallel`      | `operators`    | Runs N actions over the same input, returning a flat tuple of results. Self-flattening variant: `ParallelCompose`. |
+| `parallel`      | `operators`    | Runs N actions over the same input, returning a flat tuple of results. Branches run one after another when called synchronously and concurrently through `acall`. Self-flattening variant: `ParallelCompose`. |
 | `fallback`      | `operators`    | Tries one action; on failure, runs another or returns the original data.                                           |
 | `identity`      | `primitives`   | No-op — returns data unchanged.                                                                                    |
 | `constant`      | `primitives`   | Ignores data, always returns a fixed value.                                                                        |
@@ -253,8 +253,12 @@ Greet = create_action(greet)
 or flattened into `(*args, **kwargs)`. Sync functions support `__call__`, while `async def`
 functions generate native `acall` methods.
 
+Generated actions log through `simplibs-validate`'s `log_this` under the module of the source
+function, so the records follow your application's logging configuration; large arguments and
+results are shortened. Pass `use_logging=False` to switch it off for one action.
+
 ➡️ [README_CREATOR](https://github.com/simplibs/simplibs-actions/blob/main/docs/README_CREATOR.md) — `create_action` and every internal resolver/generator it's built from
-➡️ [README_DECOTATOR](https://github.com/simplibs/simplibs-actions/blob/main/docs/README_DECOTATOR.md) — `to_action`, the decorator interface
+➡️ [README_DECORATOR](https://github.com/simplibs/simplibs-actions/blob/main/docs/README_DECORATOR.md) — `to_action`, the decorator interface
 
 ---
 
@@ -284,10 +288,10 @@ assert_action(
 ## ⚠️ Exceptions
 
 Every diagnostic this library raises — a rejected constructor argument, calling an
-async action via sync `__call__` (`AsyncActionRequiresAcallError`), a type mismatch
+async action via sync `__call__` (`ASYNC_ACTION_REQUIRES_ACALL`), a type mismatch
 on call, or an unsupported source-function signature — is a structured
 [`simplibs.exception`](https://pypi.org/project/simplibs-exception/) card
-(`ParamError`, `ValidationError`, `AsyncActionRequiresAcallError`), not a bare
+(`ParamError`, `ValidationError`), not a bare
 `TypeError`/`ValueError` traceback.
 Validation failures on a generated `Action`'s own parameters (constructor or call) go
 through [`simplibs-validate`](https://pypi.org/project/simplibs-validate/)'s

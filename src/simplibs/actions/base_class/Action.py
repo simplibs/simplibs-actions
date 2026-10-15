@@ -73,7 +73,7 @@ class Action(ABC):
         return self.then(next_step)
 
     def __and__(self, other: Any) -> "Action":
-        """Executes actions in parallel over identical input data: `actionA & actionB`."""
+        """Runs both actions over identical input data (concurrently only through `acall`): `actionA & actionB`."""
         from ..containers.operators.compose_class import ParallelCompose
         return ParallelCompose.compose(first=self, second=self.resolve_action(other))
 
@@ -95,7 +95,7 @@ class Action(ABC):
     # duplicated container-construction logic.
 
     def __rand__(self, other: Any) -> "Action":
-        """Supports `rule & action` — verify AND execute in parallel."""
+        """Supports `rule & action` — verify AND run the action over the same data."""
         return self.resolve_action(other) & self
 
     def __ror__(self, other: Any) -> "Action":
@@ -215,9 +215,9 @@ try `action.__rand__(rule)`.
 The semantics of all three are derived from what the `guard` container
 does (pass through unchanged if the `Rule` holds, otherwise raise):
 * `rule >> action` — check, then continue (sequence).
-* `rule & action` — check AND run the action (in parallel; both must
-  succeed — the spirit of `AllOf`, shifted from "predicate AND
-  predicate" to "gate AND action").
+* `rule & action` — check AND run the action (over the same data, concurrently
+  only through `acall`; both must succeed — the spirit of `AllOf`, shifted from 
+  "predicate AND predicate" to "gate AND action").
 * `rule | action` — check, and on failure run the action instead (the
   spirit of `AnyOf` — at least one path must succeed, only the first
   path is a hard gate).

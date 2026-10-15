@@ -9,7 +9,7 @@ from ._validations import raise_not_iterable
 
 @to_action
 def for_each(
-    data: Iterable[Any],
+    data: Iterable,
     action: Any,
 ) -> list[Any]:
     """Applies `action` to every item of an iterable input."""
@@ -27,7 +27,7 @@ def for_each(
     return [inner(item) for item in items]
 
 
-async def _for_each_acall(self, data: Iterable[Any]) -> list[Any]:
+async def _for_each_acall(self, data: Iterable) -> list[Any]:
     """Async counterpart of `for_each`'s own body.
 
     Runs `action` over every item CONCURRENTLY via `asyncio.gather` —
@@ -65,7 +65,9 @@ Init Params:
     action (Action | Rule | Callable[[Any], Any]): Runs once per item.
 
 Main Param:
-    data (Iterable[Any]): The collection whose items are processed.
+    data (Iterable): The collection whose items are processed. A generator (or any
+        other one-shot iterator) is accepted: the synchronous path reads it lazily,
+        one item at a time; `acall` materializes it first.
 
 Output:
     list[Any]: One result per input item, in order.
@@ -87,10 +89,23 @@ _DESIGN_NOTES = """
 ## Main parameter has a real data contract
 Unlike most containers (where the main parameter is `Any`, because the
 container itself doesn't care about the data's shape), `for_each` has a
-genuine contract on `data` — it must be iterable. Kept as `Iterable[Any]`
-in the annotation; `IsTyping` already decomposes `Iterable[Any]` on its
-own (a supported origin), so `for_each` gets a meaningful type check for
-free via `create_action`, ahead of the `iter()` call itself.
+genuine contract on `data` — it must be iterable. It is annotated as plain
+`Iterable`, not `Iterable[Any]`: the plain form checks exactly that
+(`isinstance(data, Iterable)`) and touches no item, so `create_action` gives
+`for_each` its type check ahead of the `iter()` call without walking the data.
+
+## Why not `Iterable[Any]`
+`Iterable[Any]` constrains nothing about the items (they are `Any`), but its
+decomposition still walks the whole value to check them — and walks it twice,
+once in the generated `__call__` and once in `act`. For a generator that meant
+the validation consumed it and the body received an exhausted iterator: the
+result was silently `[]`. Since `simplibs-rules` 0.4.0 `Iterable[T]` rejects
+one-shot iterators outright, which would make the synchronous path refuse the
+very input `for_each` is designed to stream through (and disagree with `acall`,
+which is not validated and accepts it). Plain `Iterable` keeps both paths
+consistent: lists and other re-iterable containers are processed as before, a
+generator reaches the body untouched and is read lazily, a non-iterable value is
+rejected by the type check.
 
 ## Why `acall` is hand-attached, and why it uses `asyncio.gather`
 Same underlying reasoning as `parallel`'s own design notes for why
