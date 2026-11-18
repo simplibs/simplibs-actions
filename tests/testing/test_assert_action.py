@@ -186,36 +186,39 @@ def test_assert_action_runs_construction_check_when_opted_in(subtests):
     )
 
 
-def test_assert_action_skips_construction_check_without_action_class(subtests):
-    """Verify that invalid_init_params alone, without action_class, is silently skipped (not an error)."""
+def test_assert_action_rejects_init_params_without_action_class(subtests):
+    """Verify that invalid_init_params without action_class is a mistake of the test: ValueError, not a silent skip."""
     action = _double()
 
-    assert_action(
-        subtests,
-        action,
-        invalid_init_params=[((), {"bogus": 1})],
-        verbose=False,
-    )
+    with pytest.raises(ValueError, match="action_class"):
+        assert_action(
+            subtests,
+            action,
+            invalid_init_params=[((), {"bogus": 1})],
+            verbose=False,
+        )
 
 
-def test_assert_action_construction_check_is_gated_by_deep_check(subtests):
-    """Verify that with deep_check=False the construction sweep is not run at all.
+def test_assert_action_rejects_init_params_with_deep_check_false(subtests):
+    """Verify that the construction sweep is never silently skipped by deep_check=False: ValueError.
 
-    The 'invalid' init params below are in fact valid, so the sweep would fail if it ran.
+    The 'invalid' init params below are in fact valid, so a sweep that ran would fail; the call must
+    be rejected before that, because the sweep would otherwise never run and the test look green.
     """
 
     @to_action
     def _greet(data: dict, prefix: str) -> str:
         return f"{prefix}, {data['name']}!"
 
-    assert_action(
-        subtests,
-        _greet(prefix="Hi"),
-        action_class=_greet,
-        invalid_init_params=[((), {"prefix": "perfectly-valid"})],
-        deep_check=False,
-        verbose=False,
-    )
+    with pytest.raises(ValueError, match="deep_check=False"):
+        assert_action(
+            subtests,
+            _greet(prefix="Hi"),
+            action_class=_greet,
+            invalid_init_params=[((), {"prefix": "perfectly-valid"})],
+            deep_check=False,
+            verbose=False,
+        )
 
 
 # ==============================================================================

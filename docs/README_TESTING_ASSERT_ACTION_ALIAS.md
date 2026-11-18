@@ -77,9 +77,11 @@ assert_action_alias(subtests, pass_through, identity)
 * **`expected_output`** (`Any`, default `UNSET`): Expected result of
   `sample_action(sample_input)`. The smoke test only runs when this **and**
   `sample_action` are both given.
+  Giving only one of the two raises `ValueError` (the smoke test would silently not run).
 * **`verbose`** (`bool`, default `True`): Registers each check as an isolated pytest
   subtest.
-* **`intro`** (`str`, default `""`): Prefix for generated subtest names.
+* **`intro`** (`str`, default `""`): Prefix for generated subtest names. They read
+  `{intro}[alias name] test_alias_is_canonical` and `{intro}[alias name] test_smoke_run`.
 
 ```python
 def assert_action_alias(
@@ -101,9 +103,12 @@ def assert_action_alias(
 # 1. Structural identity check
 assert alias is canonical
 
-# 2. Optional end-to-end smoke test
-if sample_action is not None and expected_output is not UNSET:
-    result = sample_action(sample_input)
+# 2. Optional end-to-end smoke test (a native-async action goes through acall)
+if sample_action is not None:
+    if getattr(sample_action, "is_async", False):
+        result = asyncio.run(sample_action.acall(sample_input))
+    else:
+        result = sample_action(sample_input)
     assert result == expected_output
 ```
 

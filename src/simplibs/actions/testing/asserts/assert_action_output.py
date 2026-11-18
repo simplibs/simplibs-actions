@@ -79,4 +79,7 @@ actions.
 * **Fail-Fast Length Guard:** A length mismatch between `valid_values` and `expected_outputs`
   is almost always a copy-paste mistake in the test itself — raising early avoids a confusing
   off-by-one `IndexError` mid-sweep.
+## Limits
+Async actions run through `asyncio.run(action.acall(value))`, which cannot start inside an already
+running event loop. Call this from an ordinary (sync) test function.
 """

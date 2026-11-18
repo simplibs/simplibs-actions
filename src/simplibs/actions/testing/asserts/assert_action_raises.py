@@ -90,4 +90,7 @@ on async actions.
 * **Async Detection Reads `is_async`:** Not `inspect.iscoroutinefunction(action.acall)` — the base
   `Action.acall` is always `async def`, so that check would be True for every action and a sync
   action would be tested through the thread bridge instead of its real `__call__`.
+## Limits
+Async actions run through `asyncio.run(action.acall(value))`, which cannot start inside an already
+running event loop. Call this from an ordinary (sync) test function.
 """

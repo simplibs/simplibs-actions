@@ -1,4 +1,5 @@
 from typing import Any, Callable, Sequence
+from simplibs.sentinels import UNSET
 from simplibs.exception import ValidationError
 from simplibs.exception.testing import assert_function_raises
 # Outers
@@ -63,7 +64,7 @@ def assert_action_construction(
             subtests,
             make_invalid_call(args, kwargs),
             invalid_params=(),
-            exception_type=current_type,
+            exception_type=current_type if current_type is not None else UNSET,
             verbose=verbose,
             intro=f"{intro}test_action_construction_#index_{index}_",
         )

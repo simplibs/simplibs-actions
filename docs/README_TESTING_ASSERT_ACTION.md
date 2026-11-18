@@ -133,12 +133,13 @@ assert_action(subtests, identity_action, deep_check=False)
   exception).
 * **`expected_input_type` / `expected_output_type`** (`Any | UnsetType`): Asserted
   against the action class's declared `_input_type`/`_output_type`. Only checked when
-  `deep_check` is `True`.
+  `deep_check` is `True`; giving them with `deep_check=False` raises `ValueError`.
 * **`action_class`** (`type[Action] | None`): The `Action` subclass itself (as opposed
   to `action`, an instance of it). Only needed together with `invalid_init_params`.
 * **`invalid_init_params`** (`list[tuple[tuple[Any, ...], dict[str, Any]]] | None`):
   `(args, kwargs)` pairs expected to raise on construction. Requires `action_class`,
   runs only when `deep_check` is `True`.
+  Without `action_class`, or with `deep_check=False`, the call raises `ValueError`.
 * **`construction_exception_type`** (`type[Exception] | Sequence[type[Exception] | None]`):
   Default `ValidationError` — see [`assert_action_construction`](#assert_action_construction)
   for why.
@@ -196,6 +197,11 @@ def assert_action_output(
 Raises `ValueError` up front if `valid_values`/`expected_outputs` differ in length —
 almost always a copy-paste mistake in the test itself, caught before it turns into a
 confusing off-by-one `IndexError` mid-sweep.
+
+The same goes for options that could never run: `expected_outputs` without `valid_values`,
+`invalid_init_params` without `action_class`, and `expected_input_type`, `expected_output_type`
+or `invalid_init_params` together with `deep_check=False`. They raise `ValueError` before any
+check, instead of leaving a test green for the wrong reason.
 
 [▲ Back to top](#-table-of-contents)
 

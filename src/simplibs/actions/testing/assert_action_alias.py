@@ -1,6 +1,9 @@
+import asyncio
 from typing import Any
-from ..base_class import Action
 from simplibs.sentinels import UNSET
+from simplibs.exception.testing import maybe_subtest
+# Outers
+from ..base_class import Action
 
 
 def assert_action_alias(
@@ -29,42 +32,49 @@ def assert_action_alias(
         sample_input: Data input passed to `sample_action` during the smoke test.
         expected_output: The expected output from running `sample_action(sample_input)`.
         verbose: If True, registers individual checks as isolated pytest subtests.
-        intro: Optional prefix string added to the generated subtest identity name.
+        intro: Optional prefix string added to the generated subtest identity names.
 
     Raises:
+        ValueError: Only one of `sample_action` and `expected_output` is given (the smoke test
+            needs both, and would silently not run).
         AssertionError: If `alias` is not identical to `canonical`, or if the smoke test
             output does not match `expected_output`.
     """
-    prefix = f"{intro} " if intro else ""
+    if (sample_action is None) != (expected_output is UNSET):
+        raise ValueError("sample_action and expected_output must be given together (the smoke test needs both).")
+
+    alias_name = getattr(alias, "__name__", type(alias).__name__)
+    canonical_name = getattr(canonical, "__name__", type(canonical).__name__)
+    prefix = f"{intro}[{alias_name}] "
 
     # 1. Structural Identity Check (alias is canonical)
-    if verbose:
-        with subtests.test(f"{prefix}Identity Check: {alias.__name__} is {canonical.__name__}"):
-            assert alias is canonical, (
-                f"Alias '{alias.__name__}' is not the exact same object as '{canonical.__name__}'."
-            )
-    else:
+    with maybe_subtest(
+        subtests,
+        name=f"{prefix}test_alias_is_canonical",
+        verbose=verbose,
+    ):
         assert alias is canonical, (
-            f"Alias '{alias.__name__}' is not the exact same object as '{canonical.__name__}'."
+            f"Alias '{alias_name}' is not the exact same object as '{canonical_name}'."
         )
 
-    # 2. End-to-End Behavioral Smoke Test (optional if sample_action and expected_output are given)
-    if sample_action is not None and expected_output is not UNSET:
-        if verbose:
-            with subtests.test(f"{prefix}Smoke Test Execution: {alias.__name__}"):
+    # 2. End-to-End Behavioral Smoke Test (only when sample_action and expected_output are given)
+    if sample_action is not None:
+        with maybe_subtest(
+            subtests,
+            name=f"{prefix}test_smoke_run",
+            verbose=verbose,
+        ):
+            if getattr(sample_action, "is_async", False):
+                result = asyncio.run(sample_action.acall(sample_input))
+            else:
                 result = sample_action(sample_input)
-                assert result == expected_output, (
-                    f"Alias action result '{result}' did not match expected output '{expected_output}'."
-                )
-        else:
-            result = sample_action(sample_input)
             assert result == expected_output, (
-                f"Alias action result '{result}' did not match expected output '{expected_output}'."
+                f"Alias action result {result!r} did not match expected output {expected_output!r}."
             )
 
 
 _DESIGN_NOTES = """
-# assert_alias (Alias Identity & Contract Verification)
+# assert_action_alias (Alias Identity & Contract Verification)
 
 ## Purpose
 The canonical helper for verifying aliases within the `simplibs-actions` library (such as
@@ -74,26 +84,27 @@ batteries by focusing strictly on alias invariants rather than re-testing underl
 ---
 
 ## 1. The Two Invariants of an Alias
-
 An alias in this architecture is NOT a wrapper, decorator, or proxy function — it is a
 direct reference assignment (`run_in_sequence = sequence`). Therefore, testing an alias
 requires verifying only two specific facts:
-
 1. **Memory Identity (`alias is canonical`)**: Proves zero overhead, zero wrapping, and 100%
    behavioral identity. If this assertion passes, any test covering `canonical` transitively
    covers `alias`.
 2. **End-to-End Smoke Test**: A single execution path to ensure the alias module is cleanly
-   importable, correctly exposed, and callable in a real curried pipeline context.
+   importable, correctly exposed, and callable in a real curried pipeline context. An async
+   `sample_action` is run through `acall`.
 
-## 2. Integration with pytest-subtests
+## 2. Same Reporting as the Other Tools
+Every check runs through `maybe_subtest` and carries the prefix `{intro}[alias_name] `, like
+`assert_action` and the profile tools, so `verbose=False` is a plain block and the report names
+the alias. The names are read with `getattr(..., "__name__", ...)`, so an alias that is not a
+function (an instance, a `partial`) is reported by its type instead of crashing.
 
-Following the standard pattern across `simplibs` testing utilities (`assert_action`,
-`assert_rule_contract`), `assert_alias` optionally splits its execution into isolated
-`subtests`. This ensures that identity failure and execution failure are reported as clear,
-independent test outcomes.
+## 3. A Smoke Test Is All or Nothing
+`sample_action` and `expected_output` belong together. With only one of them the smoke test would
+not run and the test would be green for the wrong reason, so the call raises `ValueError`.
 
-## 3. Atomic Design
-
+## 4. Atomic Design
 This assertion function is intentionally lightweight. It does not attempt to test edge cases,
 invalid inputs, or pipeline combinations — those belong exclusively to the test suite of
 the canonical implementation.

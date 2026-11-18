@@ -62,10 +62,37 @@ def assert_action(
         intro: Optional prefix string added to the generated subtest identity name.
         deep_check: If True, additionally verifies _input_type/_output_type declaration
             and constructor parameter validation.
+
+    Raises:
+        ValueError: A mistake of the test itself, raised before any check runs:
+            valid_values without expected_outputs (or the reverse); invalid_init_params
+            without action_class; expected_input_type, expected_output_type or
+            invalid_init_params together with deep_check=False (they would never run).
     """
     assert isinstance(action, Action), (
         f"assert_action expects an Action instance, got {type(action).__name__}."
     )
+
+    # Guards against checks that would silently never run
+    if expected_outputs and not valid_values:
+        raise ValueError("expected_outputs was given without valid_values.")
+    if invalid_init_params and action_class is None:
+        raise ValueError("invalid_init_params requires action_class (the class that is constructed).")
+    if not deep_check:
+        never_run = [
+            name
+            for name, given in (
+                ("expected_input_type", expected_input_type is not UNSET),
+                ("expected_output_type", expected_output_type is not UNSET),
+                ("invalid_init_params", bool(invalid_init_params)),
+            )
+            if given
+        ]
+        if never_run:
+            raise ValueError(
+                f"{', '.join(never_run)} would never be checked with deep_check=False; "
+                f"pass deep_check=True or remove them."
+            )
 
     action_name = type(action).__name__
     prefix = f"{intro}[{action_name}] "
@@ -205,7 +232,12 @@ Asserts isinstance(action, Action) immediately, before any check runs — same r
 assert_rule_contract and assert_rule_is_valid: a misuse of this helper itself should
 produce one clear error, not a cascade of confusing subtest failures deep inside a loop.
 
-## 7. Scope Boundary — What Comes Next, Deliberately Not Here
+## 7. Guards Against Silent Skips
+Options that are only used in some situations used to be dropped without a word: `invalid_init_params`
+without `action_class`, or the type and constructor options with `deep_check=False`. A test that asks
+for a check that cannot run is a mistake of the test, so the call raises `ValueError` at once instead
+of being green for the wrong reason.
+## 8. Scope Boundary — What Comes Next, Deliberately Not Here
 
 The pipeline-level type-compatibility linter (inspect_pipeline, assert_pipeline_compatible)
 is a different tool solving a different problem — checking that a whole composed

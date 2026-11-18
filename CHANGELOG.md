@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.3] - 2026-11-18
+
+### 🔄 Changed
+
+* **`assert_action` raises `ValueError` for checks that would silently never run.** A test that asks
+  for a check which cannot run is a mistake of the test, and used to stay green for the wrong reason.
+  The call now fails before any check with a message naming the option:
+  `invalid_init_params` without `action_class`; `expected_input_type`, `expected_output_type` or
+  `invalid_init_params` together with `deep_check=False`; `expected_outputs` without `valid_values`.
+  **Behavior change** of the testing helper: the old tests that documented the silent skip were
+  rewritten to expect the `ValueError`.
+* **`assert_action_alias` raises `ValueError` when only one of `sample_action` and `expected_output`
+  is given** (the smoke test needs both and would silently not run). An alias is checked on identity
+  alone by giving neither.
+* **`assert_action_alias` subtest names** now carry the alias name, `{intro}[alias] test_alias_is_canonical`
+  and `{intro}[alias] test_smoke_run`, so two calls in one test can be told apart.
+* **Failure messages**: the plain `assert` statements of the testing package now say what was expected
+  (pytest does not rewrite the asserts of an installed package, so they failed with an empty text).
+
+### ✨ Added
+
+* **Async smoke run in `assert_action_alias`**: a native-async `sample_action` is run through `acall`
+  (its `__call__` is only a misuse guard).
+
+### 📋 Improved
+
+* **Tests**: new tests for the guards and for the alias subtest names and async smoke run; two tests
+  rewritten from "silently skipped" to "raises `ValueError`".
+
+---
+
 ## [0.2.2] - 2026-10-15
 
 ### 🐛 Fixed
